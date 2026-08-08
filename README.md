@@ -150,7 +150,7 @@ Cleanverse contracts these bind to, unchanged and not ours:
 ## Run it
 
 ```bash
-git clone --recurse-submodules <this repo> && cd standing-protocol
+git clone https://github.com/RaYYeR220/standing-protocol && cd standing-protocol
 
 # contracts
 cd contracts
@@ -166,12 +166,9 @@ npm run dev                                   # http://localhost:3000
 The console reads the live deployments and switches between them; no API keys, no accounts, no
 seeded fixtures — every number on the screen is read from the chain, including the zeroes.
 
-If the recursive clone drops a submodule (GitHub occasionally does this on the larger one), fetch
-the two dependencies directly and re-run:
-
-```bash
-cd contracts && rm -rf lib &&   git clone --depth 1 https://github.com/foundry-rs/forge-std lib/forge-std &&   git clone --depth 1 -b v5.4.0 https://github.com/OpenZeppelin/openzeppelin-contracts     lib/openzeppelin-contracts
-```
+Dependencies are vendored in `contracts/lib` — forge-std and OpenZeppelin v5.4.0, trimmed to the
+source that is actually compiled. There is nothing to install and nothing to fetch, so `forge test`
+works from a bare clone on a flaky connection.
 
 To deploy your own instance:
 
@@ -238,6 +235,7 @@ contracts/
       ApassReader.sol          decodes the on-chain credential
       StandingMath.sol         the score and the terms curve
     interfaces/ICleanverse.sol recovered Cleanverse interfaces
+  lib/                       vendored forge-std and OpenZeppelin v5.4.0
   script/
     Deploy.s.sol
     InspectCleanverse.s.sol    reproduces every claim in docs/CLEANVERSE.md
