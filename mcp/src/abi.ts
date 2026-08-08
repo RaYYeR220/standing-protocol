@@ -782,7 +782,7 @@ export const POOL_ABI = [
         "internalType": "address"
       },
       {
-        "name": "owner",
+        "name": "shareOwner",
         "type": "address",
         "internalType": "address"
       }
@@ -837,7 +837,7 @@ export const POOL_ABI = [
         "internalType": "address"
       },
       {
-        "name": "owner",
+        "name": "shareOwner",
         "type": "address",
         "internalType": "address"
       }

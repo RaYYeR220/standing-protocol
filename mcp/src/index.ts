@@ -16,21 +16,45 @@ import { CREDIT_MANAGER_ABI, POOL_ABI, REGISTRY_ABI } from "./abi.js";
 import { explainCredential, explainQuote, refusal, amount, pct } from "./rationale.js";
 import { LOAN_STATUS, type Credential, type Hex, type History, type Loan, type Quote } from "./types.js";
 
-const monadTestnet = defineChain({
-  id: 10143,
-  name: "Monad Testnet",
-  nativeCurrency: { name: "MON", symbol: "MON", decimals: 18 },
-  rpcUrls: { default: { http: [process.env.MONAD_RPC_URL ?? "https://testnet-rpc.monad.xyz"] } },
-  blockExplorers: { default: { name: "Monad Explorer", url: "https://testnet.monadexplorer.com" } },
-});
+/**
+ * The protocol is deployed from one source on both chains Cleanverse's sandbox settles on.
+ * `STANDING_CHAIN` picks which one to answer about; individual addresses can still be overridden.
+ */
+const DEPLOYMENTS = {
+  monad: {
+    chain: defineChain({
+      id: 10143,
+      name: "Monad Testnet",
+      nativeCurrency: { name: "MON", symbol: "MON", decimals: 18 },
+      rpcUrls: { default: { http: [process.env.MONAD_RPC_URL ?? "https://testnet-rpc.monad.xyz"] } },
+    }),
+    explorer: "https://testnet.monadexplorer.com",
+    creditManager: "0xC6E2aC49a18BfB71F2981efeaac2aC41Db1c1f74",
+    pool: "0x010263d8e3b2DC38F63A3f1660D2502f204ffB6D",
+    registry: "0x2bD8832C9Bc98df47F256507a903B0338D96C0b5",
+  },
+  base: {
+    chain: defineChain({
+      id: 84532,
+      name: "Base Sepolia",
+      nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
+      rpcUrls: { default: { http: [process.env.BASE_RPC_URL ?? "https://sepolia.base.org"] } },
+    }),
+    explorer: "https://sepolia.basescan.org",
+    creditManager: "0x324719787E22a7c2c3E77bc84484317c2D2D1093",
+    pool: "0x5ae228215dae30EC07D0196B13179CFA00146D03",
+    registry: "0xE066669d09afd30444429003987b9E7BcA970F19",
+  },
+} as const;
 
-const CREDIT_MANAGER = (process.env.CREDIT_MANAGER ??
-  "0xC6E2aC49a18BfB71F2981efeaac2aC41Db1c1f74") as Hex;
-const POOL = (process.env.STANDING_POOL ?? "0x010263d8e3b2DC38F63A3f1660D2502f204ffB6D") as Hex;
-const REGISTRY = (process.env.STANDING_REGISTRY ??
-  "0x2bD8832C9Bc98df47F256507a903B0338D96C0b5") as Hex;
+const SELECTED = (process.env.STANDING_CHAIN === "base" ? "base" : "monad") as keyof typeof DEPLOYMENTS;
+const D = DEPLOYMENTS[SELECTED];
 
-const client = createPublicClient({ chain: monadTestnet, transport: http() });
+const CREDIT_MANAGER = (process.env.CREDIT_MANAGER ?? D.creditManager) as Hex;
+const POOL = (process.env.STANDING_POOL ?? D.pool) as Hex;
+const REGISTRY = (process.env.STANDING_REGISTRY ?? D.registry) as Hex;
+
+const client = createPublicClient({ chain: D.chain, transport: http() });
 const DAY = 86_400n;
 
 const address = z.string().regex(/^0x[a-fA-F0-9]{40}$/, "expected a 20-byte hex address");
@@ -40,7 +64,7 @@ function text(lines: string[]) {
 }
 
 function explorer(kind: "address" | "tx", v: string) {
-  return `https://testnet.monadexplorer.com/${kind}/${v}`;
+  return `${D.explorer}/${kind}/${v}`;
 }
 
 const server = new McpServer({ name: "standing", version: "1.0.0" });

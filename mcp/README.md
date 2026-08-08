@@ -33,8 +33,10 @@ Register it with any MCP client:
 }
 ```
 
-Defaults point at the Monad testnet deployment. Override with `MONAD_RPC_URL`, `CREDIT_MANAGER`,
-`STANDING_POOL`, `STANDING_REGISTRY`.
+Defaults point at the Monad testnet deployment. Set `STANDING_CHAIN=base` to answer about Base
+Sepolia instead — that is where the live loans are. Individual addresses and RPCs can still be
+overridden with `CREDIT_MANAGER`, `STANDING_POOL`, `STANDING_REGISTRY`, `MONAD_RPC_URL`,
+`BASE_RPC_URL`.
 
 Run `npm run abi` after changing the contracts — `src/abi.ts` is generated from the Foundry
 artifacts and is not edited by hand.
