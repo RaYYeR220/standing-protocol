@@ -33,3 +33,6 @@ scratchpad/
 # os
 .DS_Store
 Thumbs.db
+
+# build output
+mcp/dist/
