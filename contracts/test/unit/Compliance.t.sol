@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.30;
 
-import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
-import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
-
 import {Fixture} from "../helpers/Fixture.sol";
 import {ComplianceGate} from "../../src/ComplianceGate.sol";
 import {CreditManager} from "../../src/CreditManager.sol";
@@ -18,6 +15,59 @@ contract ComplianceTest is Fixture {
     function setUp() public override {
         super.setUp();
         seedPool(DEPOSIT);
+    }
+
+    // ------------------------------------------------------------------ both ends are checked
+
+    function test_Gate_ChecksTheSendingPartyToo() public view {
+        (bool allowed, ComplianceGate.Refusal reason, address party) =
+            pool.checkTransferDetailed(stranger, lp, 1e6);
+        assertFalse(allowed, "an uncredentialed sender is a refusal");
+        assertEq(uint256(reason), uint256(ComplianceGate.Refusal.NoCredential));
+        assertEq(party, stranger, "and the sender is named as the failing party");
+    }
+
+    function test_Gate_NamesTheFailingPartyNotJustTheReason() public {
+        apass.setStatus(alice, ApassReader.STATUS_FROZEN);
+
+        (bool allowed, ComplianceGate.Refusal reason, address party) =
+            pool.checkTransferDetailed(alice, lp, 1e6);
+        assertFalse(allowed);
+        assertEq(uint256(reason), uint256(ComplianceGate.Refusal.CredentialFrozen));
+        assertEq(party, alice, "the frozen end is identified");
+
+        (,, address party2) = pool.checkTransferDetailed(lp, alice, 1e6);
+        assertEq(party2, alice, "whichever end it is");
+    }
+
+    function test_CheckParty_ReportsEachConditionSeparately() public {
+        (bool ok, ComplianceGate.Refusal reason) = pool.checkParty(alice);
+        assertTrue(ok);
+        assertEq(uint256(reason), uint256(ComplianceGate.Refusal.None));
+
+        (ok, reason) = pool.checkParty(stranger);
+        assertFalse(ok);
+        assertEq(uint256(reason), uint256(ComplianceGate.Refusal.NoCredential));
+
+        apass.setStatus(aliceB, ApassReader.STATUS_FROZEN);
+        (ok, reason) = pool.checkParty(aliceB);
+        assertFalse(ok);
+        assertEq(uint256(reason), uint256(ComplianceGate.Refusal.CredentialFrozen));
+
+        apass.setExpiry(vip, block.timestamp);
+        (ok, reason) = pool.checkParty(vip);
+        assertFalse(ok);
+        assertEq(uint256(reason), uint256(ComplianceGate.Refusal.CredentialExpired));
+    }
+
+    /// @dev The pool is a party to every disbursement. If it loses its credential the protocol
+    ///      stops, by design.
+    function test_Gate_RefusesEverythingIfThePoolLosesItsCredential() public {
+        apass.setStatus(address(pool), ApassReader.STATUS_FROZEN);
+
+        expectRefusal(address(pool), ComplianceGate.Refusal.CredentialFrozen);
+        vm.prank(alice);
+        manager.open(PRINCIPAL, TERM);
     }
 
     // ------------------------------------------------------------------ borrow: refusal paths
@@ -51,7 +101,8 @@ contract ComplianceTest is Fixture {
 
         assertFalse(manager.credentialOf(alice).exists, "short record is not a credential");
 
-        expectRefusal(alice, ComplianceGate.Refusal.NoCredential);
+        // The pool's credential now reads as absent too, and it is checked first.
+        expectRefusal(address(pool), ComplianceGate.Refusal.NoCredential);
         vm.prank(alice);
         manager.open(PRINCIPAL, TERM);
     }
@@ -59,7 +110,7 @@ contract ComplianceTest is Fixture {
     function test_Borrow_RefusedWhenRegistryIsUnreachable() public {
         apass.setDown(true);
 
-        expectRefusal(alice, ComplianceGate.Refusal.NoCredential);
+        expectRefusal(address(pool), ComplianceGate.Refusal.NoCredential);
         vm.prank(alice);
         manager.open(PRINCIPAL, TERM);
     }
@@ -166,14 +217,12 @@ contract ComplianceTest is Fixture {
     // ------------------------------------------------------------------ LP deposit: refusal paths
 
     function test_Deposit_RefusedWhenNoCredential() public {
-        (bool allowed, ComplianceGate.Refusal reason) = pool.checkTransfer(address(pool), stranger, 0);
+        (bool allowed, ComplianceGate.Refusal reason) = pool.checkTransfer(stranger, stranger, 1e6);
         assertFalse(allowed);
         assertEq(uint256(reason), uint256(ComplianceGate.Refusal.NoCredential));
 
-        assertEq(pool.maxDeposit(stranger), 0, "an unverified party may not hold a position");
-        vm.expectRevert(
-            abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, stranger, 1e6, 0)
-        );
+        // The gate now lives in `_deposit`, so the refusal reason survives to the caller.
+        expectRefusal(stranger, ComplianceGate.Refusal.NoCredential);
         vm.prank(stranger);
         pool.deposit(1e6, stranger);
     }
@@ -181,88 +230,56 @@ contract ComplianceTest is Fixture {
     function test_Deposit_RefusedWhenCredentialFrozen() public {
         apass.setStatus(lp2, ApassReader.STATUS_FROZEN);
 
-        (bool allowed, ComplianceGate.Refusal reason) = pool.checkTransfer(address(pool), lp2, 0);
-        assertFalse(allowed);
-        assertEq(uint256(reason), uint256(ComplianceGate.Refusal.CredentialFrozen));
-        assertEq(pool.maxDeposit(lp2), 0);
-        assertEq(pool.maxMint(lp2), 0);
+        expectRefusal(lp2, ComplianceGate.Refusal.CredentialFrozen);
+        vm.prank(lp2);
+        pool.deposit(1_000e6, lp2);
     }
 
     function test_Deposit_RefusedWhenCredentialExpired() public {
         apass.setExpiry(lp2, block.timestamp);
 
-        (bool allowed, ComplianceGate.Refusal reason) = pool.checkTransfer(address(pool), lp2, 0);
-        assertFalse(allowed);
-        assertEq(uint256(reason), uint256(ComplianceGate.Refusal.CredentialExpired));
-        assertEq(pool.maxDeposit(lp2), 0);
+        expectRefusal(lp2, ComplianceGate.Refusal.CredentialExpired);
+        vm.prank(lp2);
+        pool.deposit(1_000e6, lp2);
     }
 
-    /// @dev `maxDeposit` probes with `from = pool`, but `_deposit` checks with `from = caller`.
-    ///      Denying only the caller therefore slips past the ceiling and reaches the gate itself,
-    ///      which is where `NotCompliant` comes from.
-    function test_Deposit_RefusedWithNotCompliantWhenCallerDeniedByAssetPolicy() public {
-        policy.setPartyDenied(lp2, true);
+    function test_Deposit_RefusedWhenTheDepositorIsUncredentialedEvenIfTheReceiverIsNot() public {
+        expectRefusal(stranger, ComplianceGate.Refusal.NoCredential);
+        vm.prank(stranger);
+        pool.deposit(1_000e6, lp);
+    }
 
-        assertEq(pool.maxDeposit(lp), type(uint256).max, "receiver alone still looks fine");
+    function test_Deposit_RefusedWhenCallerDeniedByAssetPolicy() public {
+        policy.setPartyDenied(lp2, true);
 
         expectRefusal(lp, ComplianceGate.Refusal.AssetPolicyDenied);
         vm.prank(lp2);
         pool.deposit(1_000e6, lp);
     }
 
-    function test_Deposit_RefusedWithNotCompliantWhenProtocolPolicyDenies() public {
+    function test_Deposit_RefusedWhenProtocolPolicyDenies() public {
         policy.setRegistered(address(pool), true);
         policy.setSubjectDenied(address(pool), true);
 
-        (bool allowed, ComplianceGate.Refusal reason) = pool.checkTransfer(lp2, lp2, 1_000e6);
-        assertFalse(allowed);
-        assertEq(uint256(reason), uint256(ComplianceGate.Refusal.ProtocolPolicyDenied));
-
-        // `maxDeposit` reports zero, so the ERC-4626 ceiling fires first.
-        assertEq(pool.maxDeposit(lp2), 0);
-        vm.expectRevert(
-            abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, lp2, 1_000e6, 0)
-        );
+        expectRefusal(lp2, ComplianceGate.Refusal.ProtocolPolicyDenied);
         vm.prank(lp2);
         pool.deposit(1_000e6, lp2);
     }
 
-    /// @dev Fail-closed on deposit: with the policy engine down, no capital enters. The gate's own
-    ///      `NotCompliant` never surfaces because `maxDeposit` already collapsed to zero, so the
-    ///      refusal reason is only observable through `checkTransfer`.
     function test_Deposit_RefusedWhenPolicyReverts_FailsClosed() public {
         policy.setDown(true);
 
-        (bool allowed, ComplianceGate.Refusal reason) = pool.checkTransfer(lp2, lp2, 1_000e6);
-        assertFalse(allowed);
-        assertEq(uint256(reason), uint256(ComplianceGate.Refusal.AssetPolicyDenied));
-
-        assertEq(pool.maxDeposit(lp2), 0, "deposits closed while compliance cannot be established");
-        vm.expectRevert(
-            abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, lp2, 1_000e6, 0)
-        );
-        vm.prank(lp2);
-        pool.deposit(1_000e6, lp2);
-    }
-
-    /// @dev The same, reached through `_deposit` so the gate's own error is the one that reverts:
-    ///      the policy only objects once the amount is non-zero, which `maxDeposit` never probes.
-    function test_Deposit_RefusedWithNotCompliantWhenPolicyOnlyDeniesNonZeroAmounts() public {
-        policy.setDenyAtOrAbove(1);
-
-        assertEq(pool.maxDeposit(lp2), type(uint256).max, "maxDeposit probes with amount 0 and passes");
-
         expectRefusal(lp2, ComplianceGate.Refusal.AssetPolicyDenied);
         vm.prank(lp2);
         pool.deposit(1_000e6, lp2);
     }
 
-    function test_Mint_RefusedWithNotCompliantWhenPolicyOnlyDeniesNonZeroAmounts() public {
-        policy.setDenyAtOrAbove(1);
+    function test_Mint_RefusedWhenPolicyReverts_FailsClosed() public {
+        policy.setDown(true);
 
         expectRefusal(lp2, ComplianceGate.Refusal.AssetPolicyDenied);
         vm.prank(lp2);
-        pool.mint(1_000e6, lp2);
+        pool.mint(1_000e12, lp2);
     }
 
     // ------------------------------------------------------------------ LP withdrawal: refusals
@@ -319,7 +336,18 @@ contract ComplianceTest is Fixture {
 
         expectRefusal(lp, ComplianceGate.Refusal.AssetPolicyDenied);
         vm.prank(lp);
-        pool.redeem(1_000e6, lp, lp);
+        pool.redeem(1_000e12, lp, lp);
+    }
+
+    /// @dev A third party redeeming on an owner's behalf is a party to the exit and is checked.
+    function test_Withdraw_RefusedWhenTheSpenderIsUncredentialed() public {
+        uint256 shares = pool.balanceOf(lp);
+        vm.prank(lp);
+        pool.approve(stranger, shares);
+
+        expectRefusal(stranger, ComplianceGate.Refusal.NoCredential);
+        vm.prank(stranger);
+        pool.withdraw(1_000e6, lp, lp);
     }
 
     // ------------------------------------------------------------------ repayment leg
@@ -335,6 +363,18 @@ contract ComplianceTest is Fixture {
         manager.repay(loanId);
     }
 
+    /// @dev The repay leg now checks the borrower as well, so a frozen borrower is stopped.
+    function test_Repay_RefusedWhenBorrowerCredentialFrozen() public {
+        vm.prank(alice);
+        uint256 loanId = manager.open(PRINCIPAL, TERM);
+
+        apass.setStatus(alice, ApassReader.STATUS_FROZEN);
+
+        expectRefusal(alice, ComplianceGate.Refusal.CredentialFrozen);
+        vm.prank(alice);
+        manager.repay(loanId);
+    }
+
     // ------------------------------------------------------------------ credential decoding
 
     function test_CredentialOf_DecodesTheRegistryRecord() public view {
@@ -346,6 +386,7 @@ contract ComplianceTest is Fixture {
         assertEq(c.expiresAt, START_TS + ONE_YEAR, "expiry");
         assertEq(c.issuedAt, START_TS - ONE_YEAR, "issuedAt");
         assertEq(c.kycHash, KYC_ALICE, "kyc hash");
+        assertEq(c.previousKycHash, bytes32(0), "never rotated");
     }
 
     function test_CredentialOf_ClampsOutOfRangeTierToNinetyNine() public {
@@ -355,11 +396,21 @@ contract ComplianceTest is Fixture {
         assertEq(c.subTier, 99, "subTier clamped");
     }
 
-    function test_Gate_ChecksTheReceivingPartyOnly() public view {
-        // `from` is never credential-checked. Documented here because several refusal paths in this
-        // file depend on knowing it, and because it is the root of the withdrawal bypass in
-        // KnownBugs.t.sol.
-        (bool allowed,) = pool.checkTransfer(stranger, lp, 1e6);
-        assertTrue(allowed, "an uncredentialed sender is not itself a refusal");
+    /// @dev The registry lays `group`/`subGroup` out left-aligned, which is what `bytes2(word)`
+    ///      reads. Live confirmation on real data is in the fork suite.
+    function test_CredentialOf_DecodesTheLeftAlignedGroupTags() public {
+        apass.setGroups(alice, bytes2("RD"), bytes2("CD"));
+
+        ApassReader.Credential memory c = manager.credentialOf(alice);
+        assertEq(c.group, bytes2("RD"), "group");
+        assertEq(c.subGroup, bytes2("CD"), "subGroup");
+    }
+
+    function test_CredentialOf_CarriesThePreviousKycHash() public {
+        apass.rotateKycHash(alice, keccak256("kyc:alice:v2"));
+
+        ApassReader.Credential memory c = manager.credentialOf(alice);
+        assertEq(c.kycHash, keccak256("kyc:alice:v2"), "current");
+        assertEq(c.previousKycHash, KYC_ALICE, "previous is no longer discarded");
     }
 }

@@ -19,6 +19,19 @@ export const creditManagerAbi = [
   },
   {
     "type": "function",
+    "name": "MIN_LOAN_PRINCIPAL",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "MIN_TERM_SECONDS",
     "inputs": [],
     "outputs": [
@@ -39,6 +52,30 @@ export const creditManagerAbi = [
         "name": "",
         "type": "address",
         "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "checkParty",
+    "inputs": [
+      {
+        "name": "party",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "ok",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "reason",
+        "type": "uint8",
+        "internalType": "enum ComplianceGate.Refusal"
       }
     ],
     "stateMutability": "view"
@@ -73,6 +110,45 @@ export const creditManagerAbi = [
         "name": "reason",
         "type": "uint8",
         "internalType": "enum ComplianceGate.Refusal"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "checkTransferDetailed",
+    "inputs": [
+      {
+        "name": "from",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "to",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "allowed",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "reason",
+        "type": "uint8",
+        "internalType": "enum ComplianceGate.Refusal"
+      },
+      {
+        "name": "party",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "view"
@@ -135,6 +211,11 @@ export const creditManagerAbi = [
           },
           {
             "name": "kycHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "previousKycHash",
             "type": "bytes32",
             "internalType": "bytes32"
           }
@@ -573,22 +654,28 @@ export const creditManagerAbi = [
   },
   {
     "type": "event",
-    "name": "ComplianceRefused",
+    "name": "DefaultReportOpened",
     "inputs": [
       {
-        "name": "party",
+        "name": "loanId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "kycHash",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "borrower",
         "type": "address",
         "indexed": true,
         "internalType": "address"
       },
       {
-        "name": "reason",
-        "type": "uint8",
-        "indexed": false,
-        "internalType": "enum ComplianceGate.Refusal"
-      },
-      {
-        "name": "amount",
+        "name": "amountOwed",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -873,6 +960,19 @@ export const creditManagerAbi = [
 export const standingPoolAbi = [
   {
     "type": "function",
+    "name": "apassRegistry",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "asset",
     "inputs": [],
     "outputs": [
@@ -918,6 +1018,30 @@ export const standingPoolAbi = [
   },
   {
     "type": "function",
+    "name": "checkParty",
+    "inputs": [
+      {
+        "name": "party",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "ok",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "reason",
+        "type": "uint8",
+        "internalType": "enum ComplianceGate.Refusal"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "checkTransfer",
     "inputs": [
       {
@@ -946,6 +1070,45 @@ export const standingPoolAbi = [
         "name": "reason",
         "type": "uint8",
         "internalType": "enum ComplianceGate.Refusal"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "checkTransferDetailed",
+    "inputs": [
+      {
+        "name": "from",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "to",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "allowed",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "reason",
+        "type": "uint8",
+        "internalType": "enum ComplianceGate.Refusal"
+      },
+      {
+        "name": "party",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "view"
@@ -1048,6 +1211,11 @@ export const standingPoolAbi = [
             "name": "kycHash",
             "type": "bytes32",
             "internalType": "bytes32"
+          },
+          {
+            "name": "previousKycHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
           }
         ]
       }
@@ -1122,7 +1290,7 @@ export const standingPoolAbi = [
     "name": "maxDeposit",
     "inputs": [
       {
-        "name": "receiver",
+        "name": "",
         "type": "address",
         "internalType": "address"
       }
@@ -1141,7 +1309,7 @@ export const standingPoolAbi = [
     "name": "maxMint",
     "inputs": [
       {
-        "name": "receiver",
+        "name": "",
         "type": "address",
         "internalType": "address"
       }
@@ -1228,6 +1396,19 @@ export const standingPoolAbi = [
         "name": "",
         "type": "uint256",
         "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "policy",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract ICleanversePolicy"
       }
     ],
     "stateMutability": "view"
@@ -1347,6 +1528,19 @@ export const standingPoolAbi = [
         "name": "",
         "type": "uint256",
         "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "verifiedAsset",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "view"
@@ -1624,6 +1818,38 @@ export const standingPoolAbi = [
 export const standingRegistryAbi = [
   {
     "type": "function",
+    "name": "MIN_QUALIFYING_HOLD",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "canonicalIdentity",
+    "inputs": [
+      {
+        "name": "kycHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "historyOf",
     "inputs": [
       {
@@ -1679,6 +1905,25 @@ export const standingRegistryAbi = [
             "internalType": "uint64"
           }
         ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "supersedes",
+    "inputs": [
+      {
+        "name": "kycHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
       }
     ],
     "stateMutability": "view"

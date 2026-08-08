@@ -34,15 +34,17 @@ contract HappyPathTest is Fixture {
         assertEq(q.breakdown.historySubtotal, 0, "history subtotal");
     }
 
-    function test_LpDeposit_MintsSharesOneForOneIntoAnEmptyPool() public {
+    function test_LpDeposit_MintsSharesAtParIntoAnEmptyPool() public {
         vm.prank(lp);
         uint256 shares = pool.deposit(DEPOSIT, lp);
 
-        assertEq(shares, DEPOSIT, "first deposit is 1:1");
+        // Six decimals of virtual offset: shares are denominated 1e6 finer than the asset.
+        assertEq(pool.decimals(), 12, "share decimals");
+        assertEq(shares, DEPOSIT * SHARE_UNIT, "first deposit is at par");
         assertEq(pool.totalAssets(), DEPOSIT, "total assets");
         assertEq(pool.availableLiquidity(), DEPOSIT, "liquidity");
         assertEq(pool.utilizationBps(), 0, "utilization");
-        assertEq(pool.convertToAssets(1e6), 1e6, "share price starts at par");
+        assertEq(sharePrice(), 1e6, "share price starts at par");
     }
 
     function test_Borrow_IsUnderCollateralized() public {
@@ -58,6 +60,7 @@ contract HappyPathTest is Fixture {
         assertEq(l.principal, PRINCIPAL, "principal amount");
         assertEq(uint256(l.aprBps), APR_BPS_TIER50, "apr");
         assertEq(l.interestDue, INTEREST, "interest booked at open");
+        assertEq(l.openedAt, START_TS, "opened at");
         assertEq(l.dueAt, START_TS + TERM, "maturity");
         assertEq(uint256(l.status), uint256(CreditManager.Status.Active), "active");
         assertEq(l.kycHash, KYC_ALICE, "identity anchor");
@@ -102,7 +105,7 @@ contract HappyPathTest is Fixture {
         vm.warp(START_TS + TERM);
 
         uint256 assetsBefore = pool.totalAssets();
-        uint256 priceBefore = pool.convertToAssets(1e6);
+        uint256 priceBefore = sharePrice();
         uint256 supplyBefore = pool.totalSupply();
 
         vm.expectEmit(true, true, false, true, address(manager));
@@ -117,7 +120,7 @@ contract HappyPathTest is Fixture {
         // Share price rises by exactly the interest, no more and no less.
         assertEq(pool.totalAssets(), assetsBefore + INTEREST, "total assets += interest");
         assertEq(pool.totalSupply(), supplyBefore, "no shares minted or burned");
-        assertGt(pool.convertToAssets(1e6), priceBefore, "share price rose");
+        assertGt(sharePrice(), priceBefore, "share price rose");
         assertApproxEqAbs(pool.previewRedeem(supplyBefore), DEPOSIT + INTEREST, 1, "LP claim");
 
         assertEq(pool.outstandingPrincipal(), 0, "nothing outstanding");
@@ -134,9 +137,10 @@ contract HappyPathTest is Fixture {
 
         vm.prank(alice);
         uint256 loanId = manager.open(PRINCIPAL, TERM);
+        vm.warp(START_TS + TERM);
 
         vm.expectEmit(true, true, false, true, address(registry));
-        emit StandingRegistry.LoanRepaid(KYC_ALICE, alice, PRINCIPAL, INTEREST);
+        emit StandingRegistry.LoanRepaid(KYC_ALICE, alice, PRINCIPAL, INTEREST, true);
         vm.prank(alice);
         manager.repay(loanId);
 
@@ -182,5 +186,39 @@ contract HappyPathTest is Fixture {
         CreditManager.Quote memory q = manager.quote(alice, 1e6, 30 days);
         assertGt(q.score, SCORE_TIER50, "score rose on a clean repayment");
         assertGt(q.creditLine, lineBefore, "credit line rose");
+    }
+
+    /// @dev A loan closed before the minimum holding period is honoured, but buys no standing.
+    function test_Repay_BelowTheMinimumHoldDoesNotCountTowardsStanding() public {
+        seedPool(DEPOSIT);
+
+        uint256 scoreBefore = manager.quote(alice, 1e6, 30 days).score;
+
+        vm.prank(alice);
+        uint256 loanId = manager.open(PRINCIPAL, MAX_TERM);
+        vm.warp(START_TS + registry.MIN_QUALIFYING_HOLD() - 1);
+
+        vm.expectEmit(true, true, false, true, address(registry));
+        emit StandingRegistry.LoanRepaid(KYC_ALICE, alice, PRINCIPAL, INTEREST * 2, false);
+        vm.prank(alice);
+        manager.repay(loanId);
+
+        StandingRegistry.History memory h = historyOf(KYC_ALICE);
+        assertEq(h.loansOriginated, 1, "the origination is still on the record");
+        assertEq(h.loansRepaid, 0, "but it earned no repayment credit");
+        assertEq(h.totalRepaid, 0, "and no volume credit");
+        assertEq(manager.quote(alice, 1e6, 30 days).score, scoreBefore, "score unmoved");
+    }
+
+    function test_Repay_ExactlyAtTheMinimumHoldQualifies() public {
+        seedPool(DEPOSIT);
+
+        vm.prank(alice);
+        uint256 loanId = manager.open(PRINCIPAL, MAX_TERM);
+        vm.warp(START_TS + registry.MIN_QUALIFYING_HOLD());
+        vm.prank(alice);
+        manager.repay(loanId);
+
+        assertEq(historyOf(KYC_ALICE).loansRepaid, 1, "qualifying at the boundary");
     }
 }

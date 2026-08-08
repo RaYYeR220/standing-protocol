@@ -16,7 +16,8 @@ import {ApassReader} from "../../src/libraries/ApassReader.sol";
 import {StandingMath} from "../../src/libraries/StandingMath.sol";
 
 /// @notice Deterministic deployment of the whole protocol against controllable Cleanverse mocks.
-/// @dev Ceilings match script/Deploy.s.sol so the numbers asserted here are the numbers that ship.
+/// @dev Mirrors script/Deploy.s.sol exactly, including the renunciation of registry admin, so the
+///      numbers and the authority surface asserted here are the ones that ship.
 abstract contract Fixture is Test {
     MockApass internal apass;
     MockPolicy internal policy;
@@ -50,9 +51,13 @@ abstract contract Fixture is Test {
     uint256 internal constant START_TS = 1_800_000_000;
     uint256 internal constant ONE_YEAR = 365 days;
 
-    /// @dev Expected underwriting for a tier-50 identity with >= 10 aUSDC and a clean record.
+    /// @dev Every funded actor starts with 1_000_000 aUSDC, which is the top rung of the asset
+    ///      ladder (>= 100_000 units -> 250 points).
+    uint256 internal constant START_BALANCE = 1_000_000e6;
+
+    /// @dev Expected underwriting for a tier-50 identity on the top asset rung and a clean record.
     /// tier 50*300/99 = 151, subTier 0, tenure 50  -> identity 201
-    /// assets capped at 10 units * 25              -> 250
+    /// assets (>= 100_000 aUSDC)                   -> 250
     /// history                                     -> 0
     uint256 internal constant SCORE_TIER50 = 451;
     uint256 internal constant LINE_TIER50 = 8_825e6; // 5_000e6 + 45_000e6 * 51 / 600
@@ -62,6 +67,9 @@ abstract contract Fixture is Test {
     /// @dev tier 99 + subTier 99 + full tenure caps identity at 400; + 250 assets -> 650.
     uint256 internal constant SCORE_VIP = 650;
     uint256 internal constant LINE_VIP = 23_750e6; // 5_000e6 + 45_000e6 * 250 / 600
+
+    /// @dev Shares carry `_decimalsOffset() == 6` more decimals than the asset.
+    uint256 internal constant SHARE_UNIT = 1e6;
 
     function setUp() public virtual {
         vm.warp(START_TS);
@@ -86,6 +94,8 @@ abstract contract Fixture is Test {
         vm.startPrank(admin);
         pool.grantRole(pool.CREDIT_MANAGER_ROLE(), address(manager));
         registry.grantRole(registry.RECORDER_ROLE(), address(manager));
+        // As in script/Deploy.s.sol: after this the recorder set can never change again.
+        registry.renounceRole(registry.DEFAULT_ADMIN_ROLE(), admin);
         vm.stopPrank();
 
         issueCredential(lp, 50, 0, KYC_LP);
@@ -95,14 +105,14 @@ abstract contract Fixture is Test {
         issueCredential(vip, 99, 99, KYC_VIP);
         issueCredential(vipB, 99, 99, KYC_VIP);
 
-        // The pool is given a credential of its own. That is NOT cosmetic: `CreditManager.repay`
-        // runs the compliance gate with `to = address(pool)`, so without this every repayment in
-        // the suite would revert. See KnownBugs.t.sol#test_BUG_Repay_BrickedWhenPoolHasNoApass.
+        // The pool is a party to every disbursement and every repayment, so it holds an A-Pass of
+        // its own. This is a deployment prerequisite, not a test convenience -- see
+        // ForkTest#test_Fork_Deployment_GateRefusesEverythingUntilThePoolIsCredentialed.
         issueCredential(address(pool), 50, 0, KYC_POOL);
 
         address[7] memory funded = [lp, lp2, alice, aliceB, stranger, vip, vipB];
         for (uint256 i = 0; i < funded.length; i++) {
-            asset.mint(funded[i], 1_000_000e6);
+            asset.mint(funded[i], START_BALANCE);
             vm.startPrank(funded[i]);
             asset.approve(address(pool), type(uint256).max);
             asset.approve(address(manager), type(uint256).max);
@@ -118,6 +128,17 @@ abstract contract Fixture is Test {
         apass.issue(holder, 1, tier, subTier, block.timestamp + ONE_YEAR, block.timestamp - ONE_YEAR, kycHash);
     }
 
+    function onboard(address who, uint256 tier, uint256 subTier, bytes32 kycHash, uint256 balance)
+        internal
+    {
+        issueCredential(who, tier, subTier, kycHash);
+        asset.mint(who, balance);
+        vm.startPrank(who);
+        asset.approve(address(pool), type(uint256).max);
+        asset.approve(address(manager), type(uint256).max);
+        vm.stopPrank();
+    }
+
     function seedPool(uint256 amount) internal {
         vm.prank(lp);
         pool.deposit(amount, lp);
@@ -125,6 +146,13 @@ abstract contract Fixture is Test {
 
     function expectRefusal(address party, ComplianceGate.Refusal reason) internal {
         vm.expectRevert(abi.encodeWithSelector(ComplianceGate.NotCompliant.selector, party, reason));
+    }
+
+    /// @notice Assets per 1e6 asset-units' worth of shares. Equals 1e6 when the pool is at par.
+    /// @dev Shares carry six more decimals than the asset, so a price probe has to be denominated
+    ///      in share units rather than asset units.
+    function sharePrice() internal view returns (uint256) {
+        return pool.convertToAssets(1e12);
     }
 
     function interestFor(uint256 principal, uint256 aprBps, uint256 termSeconds)

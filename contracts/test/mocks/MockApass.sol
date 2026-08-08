@@ -13,6 +13,9 @@ pragma solidity 0.8.30;
 ///        - `0x6a069f61(uint256 tokenId)` where `tokenId == uint160(holder)`;
 ///        - ten 32-byte words: status, tier, subTier, group, subGroup, expiresAt, issuedAt,
 ///          previousKycHash, currentKycHash, countries;
+///        - `group`, `subGroup` and `countries` are LEFT-aligned (`bytes`-like); the numeric fields
+///          and the KYC hashes are plain words. Verified against tokenId 57005 on Monad testnet,
+///          whose subGroup word reads 5244000…000 -- i.e. `bytes2(word) == "RD"`;
 ///        - an unknown holder makes the registry REVERT with a custom error rather than return
 ///          zeroes. `ApassReader` has to treat that as "no credential", so that is the default here.
 contract MockApass {
@@ -85,6 +88,21 @@ contract MockApass {
     function setTier(address holder, uint256 tier, uint256 subTier) external {
         _records[holder].tier = tier;
         _records[holder].subTier = subTier;
+    }
+
+    /// @notice Sets the institution tags using the registry's real left-aligned encoding.
+    /// @dev `bytes32(bytes2)` pads on the right, which is exactly how the live registry lays these
+    ///      out. Encoding them any other way would make the mock disagree with the chain.
+    function setGroups(address holder, bytes2 group, bytes2 subGroup) external {
+        _records[holder].group = bytes32(group);
+        _records[holder].subGroup = bytes32(subGroup);
+    }
+
+    /// @notice Sets `previousKycHash` without touching the current one.
+    /// @dev Lets a test craft a credential that claims to supersede an arbitrary identity, which is
+    ///      the shape of a compromised or mis-issued A-Pass.
+    function setPreviousKycHash(address holder, bytes32 previous) external {
+        _records[holder].previousKycHash = previous;
     }
 
     /// @notice Re-issues the credential under a new KYC hash, keeping the old one as `previous`.

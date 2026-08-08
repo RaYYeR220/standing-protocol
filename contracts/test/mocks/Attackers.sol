@@ -4,7 +4,7 @@ pragma solidity 0.8.30;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CreditManager} from "../../src/CreditManager.sol";
 import {StandingPool} from "../../src/StandingPool.sol";
-import {ITransferObserver} from "./MockVerifiedAsset.sol";
+import {IPreTransferObserver, ITransferObserver} from "./MockVerifiedAsset.sol";
 
 /// @notice A borrower that re-enters the credit manager from inside its own token movements.
 contract ReentrantBorrower is ITransferObserver {
@@ -92,20 +92,35 @@ contract ReentrantBorrower is ITransferObserver {
     }
 }
 
-/// @notice An LP that redeems from inside somebody else's repayment.
-/// @dev `CreditManager.repay` moves principal + interest into the pool and only *afterwards* tells
-///      the pool to reduce `outstandingPrincipal`. Between those two steps `totalAssets()` counts the
-///      returned principal twice. This contract measures that window, and takes it.
-contract RepaymentFrontRunner is ITransferObserver {
+/// @notice An LP that acts on the pool from inside somebody else's token transfer.
+///
+/// @dev The pool's share price is derived from `balanceOf(pool) + outstandingPrincipal`. Those two
+///      numbers are updated by different statements, and a Cleanverse Verified Asset hands control
+///      to an external contract in between — before the balance moves, when it consults its policy,
+///      and again after. This contract measures what the pool reports at each of those instants and
+///      then trades against it. `deposit` when the price is understated, `redeem` when it is
+///      overstated; either way the difference comes out of the other depositors.
+contract MidTransferTrader is ITransferObserver, IPreTransferObserver {
+    enum Action {
+        None,
+        Redeem,
+        Deposit
+    }
+
     StandingPool public immutable pool;
     IERC20 public immutable asset;
 
+    Action public action;
     bool public armed;
     bool public fired;
-    uint256 public totalAssetsDuringRepay;
-    uint256 public sharePriceDuringRepay;
+    address public watchedCounterparty;
+
+    uint256 public totalAssetsSeen;
+    uint256 public sharePriceSeen;
     uint256 public assetsRedeemed;
     uint256 public sharesRedeemed;
+    uint256 public assetsDeposited;
+    uint256 public sharesMinted;
 
     constructor(StandingPool pool_, IERC20 asset_) {
         pool = pool_;
@@ -117,25 +132,52 @@ contract RepaymentFrontRunner is ITransferObserver {
         pool.deposit(amount, address(this));
     }
 
-    function arm() external {
+    /// @param watched The address whose transfer leg to fire on: the pool for repayments and
+    ///        collateral seizures, the borrower for disbursements.
+    function arm(Action action_, address watched) external {
+        action = action_;
+        watchedCounterparty = watched;
         armed = true;
+        fired = false;
+    }
+
+    function disarm() external {
+        armed = false;
+        action = Action.None;
+    }
+
+    function onBeforeTransfer(address, address to, uint256) external {
+        _act(to);
     }
 
     function onTransfer(address, address to, uint256) external {
+        _act(to);
+    }
+
+    function _act(address to) private {
         if (!armed || fired) return;
-        if (to != address(pool)) return;
+        if (to != watchedCounterparty) return;
         fired = true;
 
-        totalAssetsDuringRepay = pool.totalAssets();
-        sharePriceDuringRepay = pool.convertToAssets(1e6);
+        totalAssetsSeen = pool.totalAssets();
+        sharePriceSeen = pool.convertToAssets(1e12);
 
-        uint256 shares = pool.balanceOf(address(this));
-        sharesRedeemed = shares;
-        assetsRedeemed = pool.redeem(shares, address(this), address(this));
+        if (action == Action.Redeem) {
+            uint256 shares = pool.balanceOf(address(this));
+            sharesRedeemed = shares;
+            assetsRedeemed = pool.redeem(shares, address(this), address(this));
+        } else if (action == Action.Deposit) {
+            uint256 amount = assetsDeposited;
+            sharesMinted = pool.deposit(amount, address(this));
+        }
+    }
+
+    function setDepositAmount(uint256 amount) external {
+        assetsDeposited = amount;
     }
 }
 
-/// @notice Deposits a dust amount, donates a large one, and eats the next depositor's money.
+/// @notice Deposits a dust amount, donates a large one, and tries to eat the next depositor's money.
 contract InflationAttacker {
     StandingPool public immutable pool;
     IERC20 public immutable asset;

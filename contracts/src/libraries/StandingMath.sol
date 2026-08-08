@@ -20,14 +20,21 @@ library StandingMath {
     uint256 internal constant MAX_SCORE = 1000;
 
     /// @notice Below this, no amount of collateral buys a loan. Identity is the entry ticket.
-    uint256 internal constant MIN_SCORE = 400;
+    /// @dev Set so that a bank-verified borrower at a mid verification tier, holding a meaningful
+    ///      verified balance, clears it on identity alone — at the maximum collateral the curve
+    ///      allows. A protocol whose entry threshold required a repayment history could never
+    ///      originate the first loan, and one that admitted anyone with a credential would be
+    ///      lending on the strength of a checkbox.
+    uint256 internal constant MIN_SCORE = 350;
 
     /// @dev Component ceilings. They sum to MAX_SCORE.
     uint256 internal constant IDENTITY_MAX = 400;
     uint256 internal constant HISTORY_MAX = 350;
     uint256 internal constant ASSETS_MAX = 250;
 
-    /// @dev Identity sub-weights.
+    /// @dev Identity sub-weights. Tier is banded rather than linear: Cleanverse's 0-99 tier encodes
+    ///      a verification standard, not a continuous quantity, and one point of it is not a
+    ///      hundredth of a bank's confidence. The bands are where the standard actually changes.
     uint256 internal constant TIER_MAX = 300;
     uint256 internal constant SUBTIER_MAX = 50;
     uint256 internal constant TENURE_MAX = 50;
@@ -97,7 +104,7 @@ library StandingMath {
         if (!ApassReader.isLive(c, nowTs)) return b;
 
         // Identity — what the issuing bank vouched for.
-        b.tierPoints = (uint256(c.tier) * TIER_MAX) / 99;
+        b.tierPoints = _tierPoints(c.tier);
         b.subTierPoints = (uint256(c.subTier) * SUBTIER_MAX) / 99;
         uint256 age = nowTs > c.issuedAt ? nowTs - c.issuedAt : 0;
         if (age > TENURE_FULL_CREDIT) age = TENURE_FULL_CREDIT;
@@ -146,6 +153,18 @@ library StandingMath {
 
         // Rate falls from 25% to 5%.
         t.aprBps = MAX_APR_BPS - (((MAX_APR_BPS - MIN_APR_BPS) * above) / span);
+    }
+
+    /// @notice Points awarded for a verification tier, banded.
+    function _tierPoints(uint8 tier) internal pure returns (uint256) {
+        if (tier >= 90) return TIER_MAX;
+        if (tier >= 75) return 265;
+        if (tier >= 60) return 230;
+        if (tier >= 45) return 190;
+        if (tier >= 30) return 140;
+        if (tier >= 15) return 80;
+        if (tier > 0) return 30;
+        return 0;
     }
 
     /// @notice Points awarded for a verified-asset balance, on a base-10 ladder.

@@ -28,6 +28,8 @@ function trim(abi, names) {
 const creditManager = trim(artifact("CreditManager.sol", "CreditManager"), [
   "credentialOf",
   "checkTransfer",
+  "checkTransferDetailed",
+  "checkParty",
   "quote",
   "open",
   "repay",
@@ -47,11 +49,12 @@ const creditManager = trim(artifact("CreditManager.sol", "CreditManager"), [
   "maxCreditLine",
   "maxTermSeconds",
   "MIN_TERM_SECONDS",
+  "MIN_LOAN_PRINCIPAL",
   "GRACE_PERIOD",
   "LoanOpened",
   "LoanRepaid",
   "LoanDefaulted",
-  "ComplianceRefused",
+  "DefaultReportOpened",
 ]);
 
 const standingPool = trim(artifact("StandingPool.sol", "StandingPool"), [
@@ -80,12 +83,20 @@ const standingPool = trim(artifact("StandingPool.sol", "StandingPool"), [
   "withdraw",
   "redeem",
   "checkTransfer",
+  "checkTransferDetailed",
+  "checkParty",
   "credentialOf",
+  "apassRegistry",
+  "policy",
+  "verifiedAsset",
 ]);
 
 const standingRegistry = trim(artifact("StandingRegistry.sol", "StandingRegistry"), [
   "historyOf",
   "walletsOf",
+  "canonicalIdentity",
+  "supersedes",
+  "MIN_QUALIFYING_HOLD",
 ]);
 
 const cleanversePolicy = trim(artifact("ICleanverse.sol", "ICleanversePolicy"), [

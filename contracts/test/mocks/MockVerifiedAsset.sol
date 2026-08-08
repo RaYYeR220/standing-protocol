@@ -7,6 +7,10 @@ interface ITransferObserver {
     function onTransfer(address from, address to, uint256 amount) external;
 }
 
+interface IPreTransferObserver {
+    function onBeforeTransfer(address from, address to, uint256 amount) external;
+}
+
 /// @title MockVerifiedAsset
 /// @notice A Cleanverse Verified Asset stand-in: plain ERC-20, 6 decimals, `policy()` getter.
 ///
@@ -17,6 +21,7 @@ interface ITransferObserver {
 contract MockVerifiedAsset is ERC20 {
     address public policyAddress;
     address public observer;
+    address public preObserver;
     bool private _inHook;
 
     constructor(address policy_) ERC20("Cleanverse Verified USDC", "aUSDC") {
@@ -43,7 +48,22 @@ contract MockVerifiedAsset is ERC20 {
         observer = observer_;
     }
 
+    /// @notice A hook that runs BEFORE balances move.
+    /// @dev This is the position a Cleanverse Verified Asset actually hands control away in: the
+    ///      token consults its policy contract to decide whether the transfer may happen at all,
+    ///      which is necessarily before it happens. Any protocol state that is inconsistent at that
+    ///      instant is observable, and reachable, from inside the transfer.
+    function setPreObserver(address observer_) external {
+        preObserver = observer_;
+    }
+
     function _update(address from, address to, uint256 value) internal override {
+        address pre = preObserver;
+        if (pre != address(0) && !_inHook) {
+            _inHook = true;
+            IPreTransferObserver(pre).onBeforeTransfer(from, to, value);
+            _inHook = false;
+        }
         super._update(from, to, value);
         address o = observer;
         if (o != address(0) && !_inHook) {
