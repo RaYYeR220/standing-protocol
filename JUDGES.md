@@ -121,9 +121,10 @@ cast call 0xC6E2aC49a18BfB71F2981efeaac2aC41Db1c1f74 \
 
 ## 7. The live loan
 
-A real under-collateralized loan was drawn and repaid on Base Sepolia during the build window:
-3.000000 aUSDC principal against 2.365800 aUSDC of collateral — **78.86%**, so a fifth of the loan
-was carried by the credential rather than by assets. Every transaction is linked in
+Real under-collateralized loans were drawn and repaid on **both** chains during the build window —
+3.000000 aUSDC against 2.365800 of collateral on Base, 8.000000 against 6.308800 on Monad. Both
+**78.86%**, because the terms come out of the same arithmetic reading the same credential; a fifth
+of each loan is carried by the credential rather than by assets. Every transaction is linked in
 [`PROOF.md`](PROOF.md), along with the moment an operator raised `min_tier` at Cleanverse and the
 on-chain verdict flipped to deny in the next block with no redeploy.
 
@@ -131,9 +132,9 @@ on-chain verdict flipped to deny in the next block with no redeploy.
 
 - A **default** takes a matured loan plus a three-day grace period, so the write-off is demonstrated
   on a fork with compressed time rather than on a live chain. Everything it touches is real.
-- **Monad's pool is empty.** Cleanverse's USDC faucet on Monad was returning `failed to execute
-  token transfer` all day, so the live loan is on Base Sepolia. The same contracts are deployed,
-  credentialed and registered on Monad, and the gate is live there — there is simply nothing to lend.
+- **The sandbox is small.** Cleanverse's USDC faucet on Monad was down for most of the build window,
+  so the balances are tens of aUSDC rather than thousands. The ratios and the mechanism are the
+  point, not the size.
 - **Testnet, not mainnet.** Sandbox credentials issue into testnet only.
 
 Everything we could not establish is in [`CLAIMS.md`](CLAIMS.md), stated with its evidence tier —

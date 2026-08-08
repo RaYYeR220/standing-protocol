@@ -127,7 +127,7 @@ engine, validator and aUSDC on each.
 | `StandingPool` | [`0x010263d8e3b2DC38F63A3f1660D2502f204ffB6D`](https://testnet.monadexplorer.com/address/0x010263d8e3b2DC38F63A3f1660D2502f204ffB6D) |
 | `StandingRegistry` | [`0x2bD8832C9Bc98df47F256507a903B0338D96C0b5`](https://testnet.monadexplorer.com/address/0x2bD8832C9Bc98df47F256507a903B0338D96C0b5) |
 
-**Base Sepolia** (chain id 84532) — where the live loans are
+**Base Sepolia** (chain id 84532)
 
 | Contract | Address |
 |---|---|
@@ -135,8 +135,10 @@ engine, validator and aUSDC on each.
 | `StandingPool` | [`0x5ae228215dae30EC07D0196B13179CFA00146D03`](https://sepolia.basescan.org/address/0x5ae228215dae30EC07D0196B13179CFA00146D03) |
 | `StandingRegistry` | [`0xE066669d09afd30444429003987b9E7BcA970F19`](https://sepolia.basescan.org/address/0xE066669d09afd30444429003987b9E7BcA970F19) |
 
-A real under-collateralized loan was drawn and repaid here during the build: 3.000000 aUSDC of
-principal against 2.365800 aUSDC of collateral — 78.86%. Transactions in [`PROOF.md`](PROOF.md).
+Under-collateralized loans were drawn and repaid on both chains during the build — 3.000000 aUSDC
+against 2.365800 of collateral on Base, 8.000000 against 6.308800 on Monad, both 78.86% at 24.72%,
+because the same arithmetic reads the same credential either side. Transactions in
+[`PROOF.md`](PROOF.md).
 
 Cleanverse contracts these bind to, unchanged and not ours:
 
@@ -199,10 +201,8 @@ The protocol is only as good as what we can actually demonstrate, so:
 - **Testnet, not mainnet.** Cleanverse's contracts are deployed at identical addresses on Monad
   mainnet, but sandbox credentials issue credentials into testnet only. Mainnet would mean a
   deployment bound to identities we cannot create.
-- **Monad's pool is empty.** Cleanverse's USDC faucet on Monad was returning
-  `failed to execute token transfer` for the whole build window while the same call on Base worked,
-  so the live loans are on Base Sepolia. Both deployments are credentialed, registered and gated;
-  there is simply nothing to lend on Monad yet.
+- **The sandbox is small.** Cleanverse's USDC faucet on Monad was down for most of the build
+  window, so live balances are tens of aUSDC rather than thousands. The ratios are the point.
 - **The A-Pass attribute getter is bound by raw selector.** We have its selector, argument and
   return layout, all verified against live state and cross-checked against the REST API for the same
   wallet. We do not have its name, and the binding would break if Cleanverse changed the layout

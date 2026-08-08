@@ -51,7 +51,7 @@ everything — which is what it did until we obtained one.
 
 ## An under-collateralized loan, on a live chain
 
-Base Sepolia, all within the build window. Read them in order.
+Both chains, all within the build window. Base Sepolia first — read them in order.
 
 | Step | Transaction |
 |---|---|
@@ -90,16 +90,18 @@ Afterwards: pool `totalAssets` 20.060953 aUSDC, `lifetimeInterest` 0.060953 aUSD
 
 ### On Monad
 
-The same contracts, credentialed and registered, taking live capital:
+The same source, the same behaviour, on the chain the hackathon is hosted with:
 
 | Step | Transaction |
 |---|---|
-| Lender approves the pool | [`0x23065976…`](https://testnet.monadexplorer.com/tx/0x230659763ef8f920bd5479e851fb64b1b94b2ee487230d2abe95464ca1f02f7e) |
-| **Lender deposits 15 aUSDC** — gate passes, shares minted | [`0x60efe685…`](https://testnet.monadexplorer.com/tx/0x60efe685fc266c284c279e51a9b0dc965611200add3ed722e6c1b1d992783536) |
+| Lender deposits 15 aUSDC | [`0x60efe685…`](https://testnet.monadexplorer.com/tx/0x60efe685fc266c284c279e51a9b0dc965611200add3ed722e6c1b1d992783536) |
 | A second lender deposits 40 aUSDC | [`0xf8721a8b…`](https://testnet.monadexplorer.com/tx/0xf8721a8b872ec67ba40a1497fec253c3bc63995181db02b1a03a65051561c0a6) |
+| **Borrower draws 8 aUSDC against 6.308800 of collateral** — 78.86% | [`0x39acc58a…`](https://testnet.monadexplorer.com/tx/0x39acc58a12b921c8fa955c7e7bb28f7caafe299d8f2cf99dfac993ba8ae76d3d) |
+| **Repays** — assets per share 1.000000 → 1.006095, interest 0.243813 to the lender | [`0xae6b290a…`](https://testnet.monadexplorer.com/tx/0xae6b290a7b92143da27ca1bb2aaeb6691a3923c10506e6ab32c27360376ff3e6) |
+| A second draw of 6 aUSDC against 4.731600, still open | [`0x3a91a825…`](https://testnet.monadexplorer.com/tx/0x3a91a825109faf5851da178a85587d8383c5ea9c58ffa2ded935ecb3cb23bc09) |
 
-The pool holds 55 aUSDC. The gate is live: `checkTransferDetailed(pool, borrower, amount)` returns
-`(true, 0)`.
+Identical ratios to Base — 78.86% collateral at 24.72% APR — because the terms come out of the same
+arithmetic reading the same credential. Nothing about the integration is chain-specific.
 
 ---
 
