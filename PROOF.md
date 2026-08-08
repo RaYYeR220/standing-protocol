@@ -88,6 +88,20 @@ APR                  24.72%
 Afterwards: pool `totalAssets` 20.060953 aUSDC, `lifetimeInterest` 0.060953 aUSDC, assets per share
 **1.000000 → 1.003047**. The interest went to the lender, not to a treasury.
 
+### On Monad
+
+The same contracts, credentialed and registered, taking live capital:
+
+| Step | Transaction |
+|---|---|
+| Lender approves the pool | [`0x23065976…`](https://testnet.monadexplorer.com/tx/0x230659763ef8f920bd5479e851fb64b1b94b2ee487230d2abe95464ca1f02f7e) |
+| **Lender deposits 15 aUSDC** — gate passes, shares minted | [`0x60efe685…`](https://testnet.monadexplorer.com/tx/0x60efe685fc266c284c279e51a9b0dc965611200add3ed722e6c1b1d992783536) |
+
+No loan has been drawn on Monad. Cleanverse's USDC faucet there returned `failed to execute token
+transfer` for the whole build window, so no borrower on that chain holds enough verified balance to
+clear the score floor — the underwriter refuses them, correctly, and the console shows the refusal.
+The gate itself is live: `checkTransferDetailed(pool, borrower, amount)` returns `(true, 0)`.
+
 ---
 
 ## The compliance rule is live, and an operator can move it
