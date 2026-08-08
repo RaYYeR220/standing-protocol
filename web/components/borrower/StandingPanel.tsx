@@ -47,12 +47,16 @@ export function StandingPanel({ quote, credential, history, balance }: Props) {
   );
   const wholeScorePenalty = Math.max(0, Number(b.defaultPenalty) - historyGross);
 
-  const tenureDays = credential
-    ? Math.max(
-        0,
-        Math.floor((Date.now() / 1000 - Number(credential.issuedAt)) / 86_400),
-      )
-    : 0;
+  // StandingMath returns an all-zero breakdown when the credential is not live, so
+  // the derivations must say that rather than compute against a zero issuedAt.
+  const nowSec = Math.floor(Date.now() / 1000);
+  const credLive = Boolean(
+    credential && credential.exists && credential.status === 1 && Number(credential.expiresAt) > nowSec,
+  );
+  const tenureDays =
+    credential && credential.issuedAt > 0n
+      ? Math.max(0, Math.floor((nowSec - Number(credential.issuedAt)) / 86_400))
+      : 0;
 
   const repaidCounted = history ? Math.min(history.loansRepaid, SCORING.REPAID_CAP) : 0;
   const volumeUnits = history
@@ -135,11 +139,28 @@ export function StandingPanel({ quote, credential, history, balance }: Props) {
             </tr>
           </thead>
           <tbody>
+            {!credLive ? (
+              <tr className="border-b border-[var(--color-line)] bg-[var(--color-refuse-wash)]">
+                <td className="px-4 py-2.5" colSpan={5}>
+                  <span className="num text-[0.75rem] text-[var(--color-refuse)]">
+                    Credential is not live at this block.
+                  </span>{" "}
+                  <span className="text-[0.75rem] text-[var(--color-bone-dim)]">
+                    StandingMath short-circuits before scoring anything: a missing, frozen or
+                    expired A-Pass returns an all-zero breakdown. Every component below is zero for
+                    that one reason, not for seven separate ones.
+                  </span>
+                </td>
+              </tr>
+            ) : null}
+
             <GroupRow label="Identity" note="what the issuing bank vouched for" />
             <Line
               name="tierPoints"
               derivation={
-                credential ? `tier ${credential.tier} × 300 ÷ 99` : "tier × 300 ÷ 99"
+                credLive && credential
+                  ? `tier ${credential.tier} × 300 ÷ 99`
+                  : "no live credential to read a tier from"
               }
               points={Number(b.tierPoints)}
               cap={SCORING.TIER_MAX}
@@ -147,14 +168,20 @@ export function StandingPanel({ quote, credential, history, balance }: Props) {
             <Line
               name="subTierPoints"
               derivation={
-                credential ? `sub-tier ${credential.subTier} × 50 ÷ 99` : "sub-tier × 50 ÷ 99"
+                credLive && credential
+                  ? `sub-tier ${credential.subTier} × 50 ÷ 99`
+                  : "no live credential to read a sub-tier from"
               }
               points={Number(b.subTierPoints)}
               cap={SCORING.SUBTIER_MAX}
             />
             <Line
               name="tenurePoints"
-              derivation={`${groupDigits(String(tenureDays))} of 365 days since the credential was issued`}
+              derivation={
+                credLive
+                  ? `${groupDigits(String(tenureDays))} of 365 days since the credential was issued`
+                  : "no live credential, so no tenure to count"
+              }
               points={Number(b.tenurePoints)}
               cap={SCORING.TENURE_MAX}
             />
@@ -198,13 +225,15 @@ export function StandingPanel({ quote, credential, history, balance }: Props) {
             <Line
               name="assetPoints"
               derivation={
-                balance !== undefined
-                  ? `balance ${formatUnits6(balance)} ${ASSET_SYMBOL} on a base-10 ladder${
-                      nextRung
-                        ? ` — next rung at ${formatUnits6(nextRung.threshold)} for ${nextRung.points}`
-                        : " — top rung"
-                    }`
-                  : "balance on a base-10 ladder"
+                !credLive
+                  ? "no live credential, so holdings are never reached"
+                  : balance !== undefined
+                    ? `balance ${formatUnits6(balance)} ${ASSET_SYMBOL} on a base-10 ladder${
+                        nextRung
+                          ? ` — next rung at ${formatUnits6(nextRung.threshold)} for ${nextRung.points}`
+                          : " — top rung"
+                      }`
+                    : "balance on a base-10 ladder"
               }
               points={Number(b.assetPoints)}
               cap={SCORING.ASSETS_MAX}

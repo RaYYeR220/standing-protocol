@@ -5,7 +5,16 @@ import type { Address } from "viem";
 import { publicClient } from "@/lib/client";
 import { cleanversePolicyAbi, creditManagerAbi } from "@/lib/abi";
 import { CONTRACTS, refusalName } from "@/lib/contracts";
-import { shortError, truncateMid } from "@/lib/format";
+import { revertSelector, shortError, truncateMid } from "@/lib/format";
+
+/** A revert from the policy engine, said plainly. Fail-closed is the point. */
+function revertProse(e: unknown, subject: string) {
+  const sel = revertSelector(e);
+  const what = sel
+    ? `${subject} reverted with ${sel}, a custom error Cleanverse does not publish an ABI for`
+    : `${subject} reverted — ${shortError(e)}`;
+  return `${what}. The gate treats a revert as a refusal: if compliance cannot be established, value does not move.`;
+}
 
 export type GateStatus = "idle" | "running" | "pass" | "deny" | "skip";
 
@@ -160,7 +169,7 @@ export function useGateSequence(
         } catch (e) {
           status = "deny";
           ret = "revert";
-          detail = `the policy engine reverted — ${shortError(e)}. The gate treats a revert as a refusal: if compliance cannot be established, value does not move.`;
+          detail = revertProse(e, "the policy engine");
         }
         await sleep(Math.max(0, DWELL - (Date.now() - started)));
         patch(
@@ -216,7 +225,7 @@ export function useGateSequence(
           } catch (e) {
             status = "deny";
             ret = "revert";
-            detail = `the policy engine reverted — ${shortError(e)}. Treated as a refusal.`;
+            detail = revertProse(e, "the policy engine");
           }
           await sleep(Math.max(0, DWELL - (Date.now() - started)));
           patch("protocol", { status, ret, detail, code: status === "deny" ? 5 : 0 }, mine);

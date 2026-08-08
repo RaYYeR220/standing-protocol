@@ -137,45 +137,50 @@ contract IdentityLinkingTest is Test {
         }
     }
 
-    /// @dev BUG: a chain assembled in reverse order is not compressed, and `canonicalIdentity` gives
-    ///      up after eight hops. Beyond that depth resolution stops at an intermediate node and the
-    ///      record at the true root becomes unreachable.
-    function test_BUG_LinkIdentity_ChainDeeperThanEightHopsLosesTheRootHistory() public {
-        bytes32[11] memory h;
-        for (uint256 i = 0; i < 11; i++) {
+    /// @dev A chain assembled in reverse order is not path-compressed, and `canonicalIdentity` gives
+    ///      up after `MAX_IDENTITY_DEPTH` hops. Beyond that, resolution stops at an intermediate node
+    ///      and the record at the true root becomes unreachable. The bound is now 32 rather than 8,
+    ///      which puts it far outside anything a real credential lineage reaches, but the cliff is
+    ///      still a cliff rather than a revert.
+    function test_LinkIdentity_ChainDeeperThanTheBoundLosesTheRootHistory() public {
+        uint256 depth = registry.MAX_IDENTITY_DEPTH();
+        assertEq(depth, 32, "documented bound");
+
+        bytes32[34] memory h;
+        for (uint256 i = 0; i < 34; i++) {
             h[i] = keccak256(abi.encode("hop", i));
         }
         // The default lives at the root.
         _default(h[0], walletA, 5_000e6);
 
-        // Build h[10]->h[9]->...->h[1]->h[0] by linking the deepest pair first, which defeats the
+        // Build h[33]->h[32]->...->h[1]->h[0] by linking the deepest pair first, which defeats the
         // path compression that a forward-built chain gets.
-        for (uint256 i = 10; i >= 1; i--) {
+        for (uint256 i = 33; i >= 1; i--) {
             registry.linkIdentity(h[i - 1], h[i]);
         }
 
         // Each link really is one level deep.
-        assertEq(registry.supersedes(h[10]), h[9], "no compression");
+        assertEq(registry.supersedes(h[33]), h[32], "no compression");
         assertEq(registry.supersedes(h[1]), h[0]);
 
-        // Eight hops from h[10] lands on h[2], not on the root.
-        assertEq(registry.canonicalIdentity(h[10]), h[2], "resolution truncates at the 8-hop bound");
-        assertEq(registry.historyOf(h[10]).loansDefaulted, 0, "the write-off is no longer visible");
+        // Thirty-two hops from h[33] lands on h[1], one short of the root.
+        assertEq(registry.canonicalIdentity(h[33]), h[1], "resolution truncates at the bound");
+        assertEq(registry.historyOf(h[33]).loansDefaulted, 0, "the write-off is no longer visible");
         assertEq(registry.historyOf(h[0]).loansDefaulted, 1, "but it is still sitting at the root");
     }
 
-    function test_LinkIdentity_ExactlyEightHopsStillResolves() public {
-        bytes32[9] memory h;
-        for (uint256 i = 0; i < 9; i++) {
-            h[i] = keccak256(abi.encode("hop8", i));
+    function test_LinkIdentity_ExactlyAtTheBoundStillResolves() public {
+        bytes32[33] memory h;
+        for (uint256 i = 0; i < 33; i++) {
+            h[i] = keccak256(abi.encode("hop32", i));
         }
         _default(h[0], walletA, 5_000e6);
-        for (uint256 i = 8; i >= 1; i--) {
+        for (uint256 i = 32; i >= 1; i--) {
             registry.linkIdentity(h[i - 1], h[i]);
         }
 
-        assertEq(registry.canonicalIdentity(h[8]), h[0], "eight hops is fine");
-        assertEq(registry.historyOf(h[8]).loansDefaulted, 1, "record intact");
+        assertEq(registry.canonicalIdentity(h[32]), h[0], "thirty-two hops is fine");
+        assertEq(registry.historyOf(h[32]).loansDefaulted, 1, "record intact");
     }
 
     // ------------------------------------------------------------------ recording resolves

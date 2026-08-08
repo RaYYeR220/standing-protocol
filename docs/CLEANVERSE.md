@@ -24,7 +24,8 @@ testnet 10143, Monad mainnet 143, and Base). All four are ERC-1967 proxies compi
 | Role | Address | Reached via |
 |---|---|---|
 | A-Pass registry (CVI) | `0xbA82D189540CaC9DC6FF46B6837CaC1BFdEC58B9` | `Policy.apass()` |
-| Policy engine (CCP) | `0x36489bE45fa84f70a0c2BDB11D824Be608CB12Dd` | `aUSDC.policy()` |
+| Policy engine — asset rules (CCP) | `0x36489bE45fa84f70a0c2BDB11D824Be608CB12Dd` | `aUSDC.policy()` |
+| Compliance validator — contract rules (CCP) | `0xaC7e5179C2C7f03f209136886c172eb34F161792` | the tx `/validator/register` sends |
 | aUSDC (CVA) | `0xaC0893567D43C3E7e6e35a72803df05416C1f20D` | `/query_deposit_atoken_list` |
 | AccessCore | `0x8F118338a1fa41E7Fa86Be19A4e8B99Ed58A6EcC` | `/query_deposit_atoken_list` |
 
@@ -66,23 +67,46 @@ Two behaviours worth knowing before you build on it:
   wraps every policy call in `try/catch` and treats a revert as a refusal, which is the only safe
   reading: an unanswerable compliance question is not a permission.
 
-### Rules are per registered contract
+### There are two compliance contracts, not one
 
-`getRules(aUSDC)` is empty, so `canTransfer` on the bare asset only enforces credential existence.
-Rules attach to *registered* contracts. `POST /validator/register` registers a contract address as a
-policy subject and attaches a rule to it (`min_tier`, `min_sub_tier`, `allowed_group`,
-`allowed_sub_group`, `countries`, `is_black_list`), after which
-`canTransfer(thatContract, from, to, amount)` evaluates the rule against the counterparties'
-credentials.
+This took us a while and is the thing most likely to trip up another integrator. `getRules(aUSDC)`
+on the policy is empty and `policy.isTokenRegistered(yourContract)` is always false, which reads
+like protocol-level rules are unsupported. They are not — they live somewhere else.
 
-That is a genuinely useful primitive: it lets a protocol carry its own compliance rule set,
-enforced by Cleanverse's contract rather than by its own code, and changeable by an operator without
-a redeploy. `ComplianceGate` consults it whenever `isTokenRegistered(address(this))` is true.
+`POST /validator/register` sends its transaction to a **separate validator contract**,
+`0xaC7e5179C2C7f03f209136886c172eb34F161792`. That is the contract behind `/validator/verify`, and
+the one that answers for a registered protocol:
+
+```solidity
+// Validator 0xaC7e5179C2C7f03f209136886c172eb34F161792
+function isRegistered(address subject) external view returns (bool);
+function getRules(address subject) external view returns (...);   // 0x550363ec
+function getRulesV2(address subject) external view returns (...); // 0x02fb0bab
+function isFrozen(address subject, address account) external view returns (bool);
+function isPaused(address subject) external view returns (bool);
+function apass() external view returns (address);
+function tokenPolicy() external view returns (address);           // -> the policy contract above
+// unnamed per-party verdict, raw selector:
+// 0xaf375463(address subject, address party) -> bool
+```
+
+Registering a contract attaches a rule to it — `min_tier`, `min_sub_tier`, `allowed_group`,
+`allowed_sub_group`, `countries`, `is_black_list` — and from then on `0xaf375463(yourContract, party)`
+evaluates that rule against the party's A-Pass.
+
+This is the most valuable thing in the whole stack and it is undocumented: a protocol can carry its
+own compliance policy, enforced by Cleanverse's contract rather than reimplemented in its own code,
+and an operator can tighten it without touching the protocol. We confirmed it rather than assuming
+it. With our pool registered, the verdict for a tier-50 wallet was `1`; raising `min_tier` to 60
+through `POST /validator/set_rule` flipped the same call to `0` in the next block; restoring it
+returned `1`. No redeploy, no upgrade, no code change.
 
 Registration requires proof of ownership. The signature format is undocumented; it is
 EIP-191 `personal_sign` over `lowercase(chain) + lowercase(contract_address)` — for example
-`"monad0xcf26de720bcc4f39508039127baf35f8f9300fc4"`. The registered contract must expose
-`owner()`, which is why ours does (it grants no authority; see `ComplianceGate`).
+`"monad0x382b067b3917f07880795396b6684e30b9d30907"`. The registered contract must expose `owner()`,
+which is why ours does (it grants no authority; see `ComplianceGate`).
+
+Note the field name on `set_rule` is `rule` (singular, an object), not `rules`.
 
 ---
 

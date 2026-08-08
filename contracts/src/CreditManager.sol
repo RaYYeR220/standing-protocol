@@ -134,18 +134,23 @@ contract CreditManager is ComplianceGate, AccessControl, ReentrancyGuard {
         address registry_,
         address apassRegistry_,
         address policy_,
+        address validator_,
         address asset_,
         address admin,
         uint256 maxLoanPrincipal_,
         uint256 maxCreditLine_,
         uint256 maxTermSeconds_
-    ) ComplianceGate(apassRegistry_, policy_, asset_, admin) {
+    ) ComplianceGate(apassRegistry_, policy_, validator_, asset_, admin) {
         pool = StandingPool(pool_);
         registry = StandingRegistry(registry_);
         maxLoanPrincipal = maxLoanPrincipal_;
         maxCreditLine = maxCreditLine_;
         maxTermSeconds = maxTermSeconds_;
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
+
+        // The pool pulls repayments and seized collateral out of this contract rather than being
+        // paid into. See StandingPool.collectRepayment for why the direction matters.
+        IERC20(asset_).forceApprove(pool_, type(uint256).max);
     }
 
     // ---------------------------------------------------------------- identity
@@ -212,7 +217,8 @@ contract CreditManager is ComplianceGate, AccessControl, ReentrancyGuard {
         StandingRegistry.History memory h = registry.historyOf(identity);
         uint256 balance = IERC20(verifiedAsset).balanceOf(borrower);
 
-        q.breakdown = StandingMath.score(c, h, balance, block.timestamp);
+        q.breakdown =
+            StandingMath.score(c, h, balance, registry.walletDefaults(borrower), block.timestamp);
         q.score = q.breakdown.score;
 
         StandingMath.Terms memory t = StandingMath.terms(q.score, maxCreditLine);
@@ -258,7 +264,8 @@ contract CreditManager is ComplianceGate, AccessControl, ReentrancyGuard {
 
         StandingRegistry.History memory h = registry.historyOf(identity);
         uint256 balance = IERC20(verifiedAsset).balanceOf(msg.sender);
-        StandingMath.Breakdown memory b = StandingMath.score(c, h, balance, block.timestamp);
+        StandingMath.Breakdown memory b =
+            StandingMath.score(c, h, balance, registry.walletDefaults(msg.sender), block.timestamp);
         if (b.score < StandingMath.MIN_SCORE) revert BelowMinimumStanding(b.score, StandingMath.MIN_SCORE);
 
         StandingMath.Terms memory t = StandingMath.terms(b.score, maxCreditLine);
@@ -311,15 +318,19 @@ contract CreditManager is ComplianceGate, AccessControl, ReentrancyGuard {
         _requireCompliant(msg.sender, address(pool), principal + interest);
 
         l.status = Status.Repaid;
-        drawnByIdentity[l.kycHash] -= principal;
 
-        // The pool's books are closed before the money arrives, not after. A verified asset calls
-        // out to its policy contract on transfer, so there is a real window in which control leaves
-        // this contract mid-repayment; retiring the principal first means `totalAssets` is briefly
-        // understated rather than double-counted, and an LP redeeming inside that window cannot be
-        // paid out of principal the pool has not yet received.
-        pool.settleRepayment(principal, interest);
-        IERC20(verifiedAsset).safeTransferFrom(msg.sender, address(pool), principal + interest);
+        // Settle against the identity this loan's key resolves to *now*. The key captured at
+        // origination can be superseded while the loan is outstanding — a sibling wallet drawing
+        // under a re-issued credential is enough — and settling against the stale key would
+        // underflow, leaving a loan that could neither be repaid nor written off.
+        drawnByIdentity[registry.canonicalIdentity(l.kycHash)] -= principal;
+
+        // The assets land here first and the pool collects them itself. A verified asset hands
+        // control to its policy contract mid-transfer, so the pool has to be on the stack for the
+        // window in which its books and its balance disagree — otherwise its reentrancy guard is
+        // not covering the one moment that needs it.
+        IERC20(verifiedAsset).safeTransferFrom(msg.sender, address(this), principal + interest);
+        pool.collectRepayment(address(this), principal, interest);
 
         if (collateral > 0) {
             IERC20(verifiedAsset).safeTransfer(l.borrower, collateral);
@@ -346,7 +357,7 @@ contract CreditManager is ComplianceGate, AccessControl, ReentrancyGuard {
         uint256 collateral = l.collateral;
 
         l.status = Status.Defaulted;
-        drawnByIdentity[l.kycHash] -= principal;
+        drawnByIdentity[registry.canonicalIdentity(l.kycHash)] -= principal;
 
         // Collateral covers what it covers; the shortfall is a real loss to depositors. Because
         // the terms curve tops out at 80% collateral, `collateral < principal` always holds and
@@ -354,13 +365,7 @@ contract CreditManager is ComplianceGate, AccessControl, ReentrancyGuard {
         uint256 recovered = collateral;
         uint256 shortfall = principal - recovered;
 
-        if (recovered > 0) {
-            IERC20(verifiedAsset).safeTransfer(address(pool), recovered);
-            pool.settleRepayment(recovered, 0);
-        }
-        if (shortfall > 0) {
-            pool.absorbLoss(shortfall);
-        }
+        pool.collectSeizure(address(this), recovered, shortfall);
 
         // The standing hit is the actual security behind the loan: it is written against the
         // identity, so it survives the borrower abandoning this wallet.

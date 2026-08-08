@@ -12,6 +12,9 @@ import {ICleanversePolicy} from "../src/interfaces/ICleanverse.sol";
 
 /// @notice The whole product, end to end, against the real Cleanverse contracts on a fork.
 ///
+/// @dev Chain-agnostic: Cleanverse deploys the same addresses everywhere it supports, so this runs
+///      unchanged against Monad or Base by pointing `--rpc-url` at either.
+///
 /// @dev Everything here is genuine: the A-Pass registry, the policy engine and aUSDC are the live
 ///      deployments, and the credentials issued below are issued by the actual issuer through the
 ///      actual entry point — we impersonate the role holders rather than substituting the
@@ -26,9 +29,11 @@ import {ICleanversePolicy} from "../src/interfaces/ICleanverse.sol";
 ///
 ///      Run:
 ///        forge script script/Demo.s.sol --rpc-url https://testnet-rpc.monad.xyz -vv
+///        forge script script/Demo.s.sol --rpc-url https://sepolia.base.org -vv
 contract Demo is Script {
     address constant APASS = 0xbA82D189540CaC9DC6FF46B6837CaC1BFdEC58B9;
     address constant POLICY = 0x36489bE45fa84f70a0c2BDB11D824Be608CB12Dd;
+    address constant VALIDATOR = 0xaC7e5179C2C7f03f209136886c172eb34F161792;
     address constant AUSDC = 0xaC0893567D43C3E7e6e35a72803df05416C1f20D;
 
     /// @dev Recovered from the transaction Cleanverse itself sent when issuing our credential.
@@ -52,7 +57,7 @@ contract Demo is Script {
     address stranger = makeAddr("stranger"); // never issued a credential
 
     function run() external {
-        console.log("Standing -- end to end on a Monad fork, against live Cleanverse contracts");
+        console.log("Standing -- end to end on a fork, against the live Cleanverse contracts");
         console.log("chain id %s", block.chainid);
 
         _deploy();
@@ -71,9 +76,9 @@ contract Demo is Script {
     function _deploy() private {
         vm.startPrank(admin);
         registry = new StandingRegistry(admin);
-        pool = new StandingPool(AUSDC, APASS, POLICY, admin);
+        pool = new StandingPool(AUSDC, APASS, POLICY, VALIDATOR, admin);
         manager = new CreditManager(
-            address(pool), address(registry), APASS, POLICY, AUSDC, admin,
+            address(pool), address(registry), APASS, POLICY, VALIDATOR, AUSDC, admin,
             MAX_LOAN_PRINCIPAL, MAX_CREDIT_LINE, MAX_TERM
         );
         pool.setCreditManager(address(manager));

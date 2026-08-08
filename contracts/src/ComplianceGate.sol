@@ -2,7 +2,7 @@
 pragma solidity 0.8.30;
 
 import {ApassReader} from "./libraries/ApassReader.sol";
-import {ICleanversePolicy} from "./interfaces/ICleanverse.sol";
+import {ICleanversePolicy, ICleanverseValidator} from "./interfaces/ICleanverse.sol";
 
 /// @title ComplianceGate
 /// @notice The check every party and every movement of value in this protocol has to pass.
@@ -17,8 +17,9 @@ import {ICleanversePolicy} from "./interfaces/ICleanverse.sol";
 ///
 ///        1. the sender holds an A-Pass that is present, active and unexpired;
 ///        2. so does the recipient;
-///        3. Cleanverse's policy engine permits the transfer under the asset's own rules;
-///        4. if this protocol has been registered as a policy subject, its own rule set permits it too.
+///        3. Cleanverse's policy engine permits the transfer under the verified asset's own rules;
+///        4. if this protocol is registered with Cleanverse's validator, its own rule set permits
+///           both parties too.
 ///
 ///      Both ends are checked because Cleanverse checks both ends: its policy engine *reverts* on an
 ///      uncredentialed counterparty rather than returning false. A consequence worth stating plainly
@@ -38,8 +39,15 @@ abstract contract ComplianceGate {
     /// @notice The Cleanverse A-Pass registry (CVI).
     address public immutable apassRegistry;
 
-    /// @notice The Cleanverse policy engine (CCP).
+    /// @notice The Cleanverse policy engine, carrying the verified asset's own rules (CCP).
     ICleanversePolicy public immutable policy;
+
+    /// @notice The Cleanverse compliance validator, carrying *this protocol's* rules (CCP).
+    /// @dev Registered via `POST /validator/register`, which binds a rule set — minimum tier,
+    ///      group, jurisdiction, blacklist — to this contract's address. Once registered, an
+    ///      operator can tighten who may transact here by changing that rule at Cleanverse, and the
+    ///      contracts obey from the next block without being redeployed or upgraded.
+    ICleanverseValidator public immutable validator;
 
     /// @notice The Cleanverse Verified Asset this protocol denominates everything in (CVA).
     address public immutable verifiedAsset;
@@ -63,9 +71,21 @@ abstract contract ComplianceGate {
 
     error NotCompliant(address party, Refusal reason);
 
-    constructor(address apassRegistry_, address policy_, address verifiedAsset_, address owner_) {
+    /// @dev Raw selector of the validator's per-party verdict. Cleanverse publishes no ABI for it;
+    ///      the selector and its `(subject, party) -> bool` shape were recovered from the deployed
+    ///      bytecode and confirmed by flipping a rule and watching the answer change.
+    bytes4 private constant VALIDATOR_VERIFY = 0xaf375463;
+
+    constructor(
+        address apassRegistry_,
+        address policy_,
+        address validator_,
+        address verifiedAsset_,
+        address owner_
+    ) {
         apassRegistry = apassRegistry_;
         policy = ICleanversePolicy(policy_);
+        validator = ICleanverseValidator(validator_);
         verifiedAsset = verifiedAsset_;
         owner = owner_;
     }
@@ -105,8 +125,9 @@ abstract contract ComplianceGate {
             return (false, Refusal.AssetPolicyDenied, to);
         }
 
-        if (_isProtocolRegistered() && !_policyAllows(address(this), from, to, amount)) {
-            return (false, Refusal.ProtocolPolicyDenied, to);
+        if (_isProtocolRegistered()) {
+            if (!_validatorAllows(from)) return (false, Refusal.ProtocolPolicyDenied, from);
+            if (!_validatorAllows(to)) return (false, Refusal.ProtocolPolicyDenied, to);
         }
 
         return (true, Refusal.None, address(0));
@@ -150,14 +171,29 @@ abstract contract ComplianceGate {
         }
     }
 
-    /// @dev Whether this protocol carries its own rule set at the policy engine. Registration is an
-    ///      off-chain administrative act, so the contracts must work either way — unregistered they
-    ///      still enforce the asset's rules, registered they additionally enforce the protocol's.
+    /// @notice Whether this protocol carries its own rule set with Cleanverse's validator.
+    /// @dev Registration is an off-chain administrative act, so the contracts work either way:
+    ///      unregistered they enforce the asset's rules, registered they additionally enforce the
+    ///      protocol's own.
+    function isProtocolRegistered() public view returns (bool) {
+        return _isProtocolRegistered();
+    }
+
     function _isProtocolRegistered() private view returns (bool) {
-        try policy.isTokenRegistered(address(this)) returns (bool ok) {
+        try validator.isRegistered(address(this)) returns (bool ok) {
             return ok;
         } catch {
             return false;
         }
+    }
+
+    /// @dev The validator's verdict for one party against this protocol's registered rule set.
+    ///      Bound by raw selector; fails closed like every other check here.
+    function _validatorAllows(address party) private view returns (bool) {
+        (bool ok, bytes memory ret) = address(validator).staticcall(
+            abi.encodeWithSelector(VALIDATOR_VERIFY, address(this), party)
+        );
+        if (!ok || ret.length < 32) return false;
+        return abi.decode(ret, (bool));
     }
 }

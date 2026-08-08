@@ -68,10 +68,10 @@ contract StandingPool is ERC4626, AccessControl, ReentrancyGuard, ComplianceGate
     error NotCreditManager();
     error CreditManagerAlreadySet();
 
-    constructor(address asset_, address apassRegistry_, address policy_, address admin)
+    constructor(address asset_, address apassRegistry_, address policy_, address validator_, address admin)
         ERC20("Standing Pool aUSDC", "stdaUSDC")
         ERC4626(IERC20(asset_))
-        ComplianceGate(apassRegistry_, policy_, asset_, admin)
+        ComplianceGate(apassRegistry_, policy_, validator_, asset_, admin)
     {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         _grantRole(RISK_ADMIN_ROLE, admin);
@@ -216,7 +216,7 @@ contract StandingPool is ERC4626, AccessControl, ReentrancyGuard, ComplianceGate
     /// @notice Sends principal to a borrower the credit manager has already underwritten.
     /// @dev The pool does not re-underwrite; it enforces its own liquidity and utilization limits
     ///      and nothing else. Identity and policy were checked by the manager on the same call.
-    function fundLoan(address borrower, uint256 amount) external onlyCreditManager {
+    function fundLoan(address borrower, uint256 amount) external onlyCreditManager nonReentrant {
         uint256 assets = totalAssets();
         uint256 ceiling = (assets * maxUtilizationBps) / 10_000;
         if (outstandingPrincipal + amount > ceiling) {
@@ -227,20 +227,41 @@ contract StandingPool is ERC4626, AccessControl, ReentrancyGuard, ComplianceGate
         emit LoanFunded(borrower, amount);
     }
 
-    /// @notice Books a repayment. The assets themselves are transferred in by the credit manager.
-    function settleRepayment(uint256 principal, uint256 interest) external onlyCreditManager {
+    /// @notice Pulls a repayment in and books it, in one guarded call.
+    /// @dev The pool collects rather than being paid. It matters because a verified asset hands
+    ///      control to its policy contract mid-transfer: if the manager pushed the assets and then
+    ///      told the pool about them, the pool would not be on the stack during the window when its
+    ///      own books and its own balance disagree, and its reentrancy guard would not apply to the
+    ///      one moment it needs to. Collecting here keeps the guard over the whole operation.
+    function collectRepayment(address from, uint256 principal, uint256 interest)
+        external
+        onlyCreditManager
+        nonReentrant
+    {
         outstandingPrincipal -= principal;
         lifetimeInterest += interest;
+        IERC20(asset()).safeTransferFrom(from, address(this), principal + interest);
         emit RepaymentSettled(principal, interest);
     }
 
-    /// @notice Writes off principal that will not be returned.
-    /// @dev Reduces `totalAssets`, so the loss lands on the share price and is shared across
-    ///      depositors in proportion to their stake. There is no reserve to hide it in.
-    function absorbLoss(uint256 principal) external onlyCreditManager {
-        outstandingPrincipal -= principal;
-        lifetimeLosses += principal;
-        emit LossAbsorbed(principal);
+    /// @notice Pulls in seized collateral and writes off the rest of the principal.
+    /// @dev Same reason as {collectRepayment}: the pool has to be on the stack for its own window.
+    ///      The shortfall reduces `totalAssets`, so the loss lands on the share price and is shared
+    ///      across depositors in proportion to their stake. There is no reserve to hide it in.
+    function collectSeizure(address from, uint256 recovered, uint256 shortfall)
+        external
+        onlyCreditManager
+        nonReentrant
+    {
+        outstandingPrincipal -= (recovered + shortfall);
+        if (shortfall > 0) {
+            lifetimeLosses += shortfall;
+            emit LossAbsorbed(shortfall);
+        }
+        if (recovered > 0) {
+            IERC20(asset()).safeTransferFrom(from, address(this), recovered);
+            emit RepaymentSettled(recovered, 0);
+        }
     }
 
     // ---------------------------------------------------------------- risk admin

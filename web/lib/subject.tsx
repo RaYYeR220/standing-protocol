@@ -34,6 +34,7 @@ export function SubjectProvider({ children }: { children: ReactNode }) {
   const { address } = useAccount();
   const [raw, setRawState] = useState("");
   const [pinnedToWallet, setPinned] = useState(true);
+  const [seeded, setSeeded] = useState(false);
 
   // Seed from ?a= on first paint so a shared link opens on the same subject.
   useEffect(() => {
@@ -42,6 +43,7 @@ export function SubjectProvider({ children }: { children: ReactNode }) {
       setRawState(q);
       setPinned(false);
     }
+    setSeeded(true);
   }, []);
 
   useEffect(() => {
@@ -57,12 +59,15 @@ export function SubjectProvider({ children }: { children: ReactNode }) {
     }
   }, [raw]);
 
+  // Mirror the subject into the query string — but not before the seed has been
+  // read, or navigating straight to a shared link would clear its own parameter.
   useEffect(() => {
+    if (!seeded) return;
     const url = new URL(window.location.href);
     if (subject) url.searchParams.set("a", subject);
     else url.searchParams.delete("a");
     window.history.replaceState(null, "", url);
-  }, [subject]);
+  }, [subject, seeded]);
 
   const setRaw = useCallback((v: string) => {
     setRawState(v);

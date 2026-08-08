@@ -51,6 +51,15 @@ contract StandingRegistry is AccessControl {
 
     mapping(bytes32 identity => History) private _history;
 
+    /// @notice Write-offs recorded against a wallet, independent of which identity it was acting for.
+    /// @dev Identity is the right key for credit history and the wrong key for punishment, because
+    ///      a credential can be re-issued and only one prior hash survives on the new record. A
+    ///      borrower holding two lineages could commit the clean one first and strand the write-off
+    ///      on a hash nothing resolves to again. The wallet cannot be re-issued, so a default also
+    ///      sticks here — clearing it requires abandoning the wallet *and* re-verifying, which is a
+    ///      far higher bar than rotating a credential.
+    mapping(address wallet => uint32 defaults) public walletDefaults;
+
     /// @dev Union-find over KYC hashes: a re-issued credential points at the one it replaced.
     mapping(bytes32 identity => bytes32 supersedes) private _supersedes;
 
@@ -157,6 +166,7 @@ contract StandingRegistry is AccessControl {
         h.loansDefaulted += 1;
         h.totalDefaulted += uint128(principalLost);
         h.lastActivityAt = uint64(block.timestamp);
+        if (wallet != address(0)) walletDefaults[wallet] += 1;
         _link(id, wallet);
         emit LoanDefaulted(id, wallet, principalLost);
     }

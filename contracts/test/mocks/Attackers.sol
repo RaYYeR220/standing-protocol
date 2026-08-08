@@ -79,7 +79,9 @@ contract ReentrantBorrower is ITransferObserver {
                 reenterError = err;
             }
         } else if (m == Mode.RerepayDuringRepayment) {
-            if (to != address(pool) || from != address(this)) return;
+            // The borrower's assets now land on the credit manager first, which is where the
+            // reentrant window would be if there were one.
+            if (from != address(this) || to != address(manager)) return;
             mode = Mode.Idle;
             attempts += 1;
             try manager.repay(targetLoan) {
@@ -121,6 +123,10 @@ contract MidTransferTrader is ITransferObserver, IPreTransferObserver {
     uint256 public sharesRedeemed;
     uint256 public assetsDeposited;
     uint256 public sharesMinted;
+
+    /// @dev Whether the pool refused the mid-transfer trade, and with what.
+    bool public blocked;
+    bytes public blockedError;
 
     constructor(StandingPool pool_, IERC20 asset_) {
         pool = pool_;
@@ -165,10 +171,19 @@ contract MidTransferTrader is ITransferObserver, IPreTransferObserver {
         if (action == Action.Redeem) {
             uint256 shares = pool.balanceOf(address(this));
             sharesRedeemed = shares;
-            assetsRedeemed = pool.redeem(shares, address(this), address(this));
+            try pool.redeem(shares, address(this), address(this)) returns (uint256 out) {
+                assetsRedeemed = out;
+            } catch (bytes memory err) {
+                blocked = true;
+                blockedError = err;
+            }
         } else if (action == Action.Deposit) {
-            uint256 amount = assetsDeposited;
-            sharesMinted = pool.deposit(amount, address(this));
+            try pool.deposit(assetsDeposited, address(this)) returns (uint256 out) {
+                sharesMinted = out;
+            } catch (bytes memory err) {
+                blocked = true;
+                blockedError = err;
+            }
         }
     }
 

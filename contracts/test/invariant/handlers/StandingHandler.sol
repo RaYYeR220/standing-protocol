@@ -32,6 +32,7 @@ contract StandingHandler is Test {
     uint256 public ghostRepays;
     uint256 public ghostDefaults;
     uint256 public ghostReissues;
+    uint256 public ghostSyncs;
 
     constructor(StandingPool pool_, CreditManager manager_, MockVerifiedAsset asset_, MockApass apass_) {
         pool = pool_;
@@ -51,6 +52,17 @@ contract StandingHandler is Test {
         _addBorrower("handler:borrower:a1", idA);
         _addBorrower("handler:borrower:a2", idA);
         _addBorrower("handler:borrower:b1", idB);
+
+        // A sibling pair that shares a current hash but names different previous hashes. This is the
+        // shape that re-parents an identity while a loan is already outstanding against the old key,
+        // so the fuzzer is deliberately given the means to try to strand one.
+        bytes32 idC = keccak256("handler:kyc:c");
+        bytes32 idCPrev = keccak256("handler:kyc:c:previous");
+        identities.push(idC);
+        identities.push(idCPrev);
+        _addBorrower("handler:borrower:c1", idC);
+        address c2 = _addBorrower("handler:borrower:c2", idC);
+        apass.setPreviousKycHash(c2, idCPrev);
     }
 
     // ------------------------------------------------------------------ actions
@@ -125,6 +137,14 @@ contract StandingHandler is Test {
         ghostReissues += 1;
     }
 
+    /// @dev Permissionless in production, so permissionless here.
+    function syncWallet(uint256 actorSeed) external {
+        address who = borrowers[bound(actorSeed, 0, borrowers.length - 1)];
+        try manager.syncIdentity(who) {
+            ghostSyncs += 1;
+        } catch {}
+    }
+
     // ------------------------------------------------------------------ views
 
     function identitiesLength() external view returns (uint256) {
@@ -147,8 +167,8 @@ contract StandingHandler is Test {
         _onboard(who, kycHash);
     }
 
-    function _addBorrower(string memory label, bytes32 kycHash) private {
-        address who = makeAddr(label);
+    function _addBorrower(string memory label, bytes32 kycHash) private returns (address who) {
+        who = makeAddr(label);
         borrowers.push(who);
         _onboard(who, kycHash);
     }

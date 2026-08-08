@@ -117,14 +117,12 @@ contract ReissuedCredentialsTest is Fixture {
 
     // ==================================================================== not fixed
 
-    /// @dev BUG (critical). `linkIdentity` is only ever called from inside `open()`, and `open()`
-    ///      reverts whenever the borrower is refused — which is exactly what happens to a defaulter.
-    ///      The link is rolled back with the rest of the transaction, so the intermediate hash is
-    ///      never recorded as superseding anything. The next re-issue then attaches to that orphan
-    ///      instead of to the identity that owns the write-off.
-    ///
-    ///      Two re-verifications launder a default completely.
-    function test_BUG_Default_LaunderedByTwoConsecutiveReissues() public {
+    /// @dev WAS: two re-verifications shed a default completely, because a credential carries only
+    ///      one previous hash and the intermediate link was never committed. NOW: the wallet that
+    ///      drew the loan carries its own write-off flag, and no amount of credential churn moves it.
+    ///      The identity chain is still broken by the second re-issue — the assertions below show
+    ///      that explicitly — but the borrower is refused anyway.
+    function test_Fixed_SameWalletCannotLaunderADefaultByReissuingTwice() public {
         _defaultAlice();
         assertEq(historyOf(KYC_ALICE).loansDefaulted, 1, "the write-off is real");
 
@@ -146,21 +144,65 @@ contract ReissuedCredentialsTest is Fixture {
         // Second re-issue. Its `previousKycHash` points at the orphan, which has no history.
         apass.rotateKycHash(alice, ALICE_V3);
 
-        CreditManager.Quote memory q = manager.quote(alice, 1_000e6, TERM);
-        assertEq(q.score, SCORE_TIER50, "clean slate");
-        assertTrue(q.approved, "the defaulter is approved again");
-
-        vm.prank(alice);
-        uint256 fresh = manager.open(1_000e6, TERM);
-        assertEq(manager.loan(fresh).principal, 1_000e6, "and draws");
-
-        assertEq(registry.canonicalIdentity(ALICE_V3), ALICE_V2, "anchored to the orphan");
-        assertEq(historyOf(ALICE_V3).loansDefaulted, 0, "write-off invisible");
+        // The identity side really is laundered: resolution stops at an orphan that has no record.
+        assertEq(
+            manager.resolveIdentity(manager.credentialOf(alice)),
+            ALICE_V2,
+            "resolves to the uncommitted intermediate hash"
+        );
+        assertEq(historyOf(ALICE_V2).loansDefaulted, 0, "which carries no write-off");
         assertEq(historyOf(KYC_ALICE).loansDefaulted, 1, "while it still sits on the old identity");
+
+        // And the wallet flag catches it regardless.
+        assertEq(registry.walletDefaults(alice), 1, "the wallet that drew it is still marked");
+
+        CreditManager.Quote memory q = manager.quote(alice, 1_000e6, TERM);
+        assertEq(q.score, SCORE_TIER50 - StandingMath.DEFAULT_PENALTY, "penalty applied anyway");
+        assertFalse(q.approved, "the defaulter stays refused");
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CreditManager.BelowMinimumStanding.selector,
+                SCORE_TIER50 - StandingMath.DEFAULT_PENALTY,
+                StandingMath.MIN_SCORE
+            )
+        );
+        vm.prank(alice);
+        manager.open(1_000e6, TERM);
     }
 
-    /// @dev The same rollback, used against the exposure cap instead of the score: one person ends
-    ///      up holding two full credit lines at once.
+    /// @dev STILL OPEN. The wallet flag follows the wallet, and the identity chain is still severed
+    ///      by a second re-issue, so a defaulter who moves to a fresh key launders the write-off:
+    ///      neither record follows them. This is the case that still needs the keeper.
+    function test_BUG_Default_StillLaunderedByTwoReissuesOntoAFreshWallet() public {
+        _defaultAlice();
+        assertEq(registry.walletDefaults(alice), 1);
+
+        // First re-issue: refused, so the link is rolled back and never committed.
+        apass.rotateKycHash(alice, ALICE_V2);
+        vm.expectRevert();
+        vm.prank(alice);
+        manager.open(1_000e6, TERM);
+        assertEq(registry.supersedes(ALICE_V2), bytes32(0), "link lost with the revert");
+
+        // Second re-issue, and the person moves to a key the protocol has never seen.
+        apass.rotateKycHash(alice, ALICE_V3);
+        address freshWallet = makeAddr("aliceFreshKey");
+        onboard(freshWallet, 50, 0, ALICE_V3, START_BALANCE);
+        apass.setPreviousKycHash(freshWallet, ALICE_V2);
+
+        assertEq(registry.walletDefaults(freshWallet), 0, "no wallet flag on a new key");
+        CreditManager.Quote memory q = manager.quote(freshWallet, 1_000e6, TERM);
+        assertEq(q.score, SCORE_TIER50, "and no identity penalty either");
+        assertTrue(q.approved, "so the write-off is shed after all");
+
+        vm.prank(freshWallet);
+        manager.open(1_000e6, TERM);
+    }
+
+    /// @dev STILL OPEN. The same severed chain, used against the exposure cap instead of the
+    ///      score. The wallet flag does not help here: it records write-offs, not drawn principal,
+    ///      and this borrower has defaulted on nothing. One person, two full lines, simultaneously.
     function test_BUG_CreditLine_DoubledByTwoConsecutiveReissues() public {
         vm.prank(alice);
         manager.open(LINE_TIER50, TERM);
@@ -186,9 +228,48 @@ contract ReissuedCredentialsTest is Fixture {
         assertEq(pool.outstandingPrincipal(), 2 * LINE_TIER50, "double the intended exposure");
     }
 
-    /// @dev Any revert in `open()` after the link is written drops it, not just a refusal on
-    ///      standing. Here the borrower simply has not approved enough collateral.
-    function test_BUG_Link_IsLostWheneverOpenRevertsForAnyReason() public {
+    /// @dev A single `syncIdentity` call while the intermediate credential is live closes the hole
+    ///      above completely. It is permissionless, idempotent and costs one transaction, so this is
+    ///      a keeper job rather than an unfixable flaw — but nothing in the protocol performs it, and
+    ///      the party with the incentive to skip it is the defaulter.
+    function test_Mitigation_OneSyncDuringTheWindowDefeatsTheTwoReissueLaundering() public {
+        _defaultAlice();
+
+        apass.rotateKycHash(alice, ALICE_V2);
+
+        // Anyone at all, watching credential rotations, commits the link.
+        vm.prank(stranger);
+        manager.syncIdentity(alice);
+        assertEq(registry.supersedes(ALICE_V2), KYC_ALICE, "committed");
+
+        // The second re-issue now resolves all the way back to the write-off -- and the check is
+        // made from a FRESH wallet, so it is the identity chain doing the work, not the wallet flag.
+        apass.rotateKycHash(alice, ALICE_V3);
+        address freshWallet = makeAddr("aliceFreshKeyMitigated");
+        onboard(freshWallet, 50, 0, ALICE_V3, START_BALANCE);
+        apass.setPreviousKycHash(freshWallet, ALICE_V2);
+
+        assertEq(registry.walletDefaults(freshWallet), 0, "unflagged wallet");
+        CreditManager.Quote memory q = manager.quote(freshWallet, 1_000e6, TERM);
+        assertEq(q.score, SCORE_TIER50 - StandingMath.DEFAULT_PENALTY, "penalty survives both hops");
+        assertFalse(q.approved, "and the defaulter stays refused");
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CreditManager.BelowMinimumStanding.selector,
+                SCORE_TIER50 - StandingMath.DEFAULT_PENALTY,
+                StandingMath.MIN_SCORE
+            )
+        );
+        vm.prank(freshWallet);
+        manager.open(1_000e6, TERM);
+    }
+
+    /// @dev Any revert in `open()` after the sync drops it, not just a refusal on standing. Here the
+    ///      borrower simply has not approved enough collateral. Harmless on its own now that
+    ///      `syncIdentity` is callable standalone, but it is why `open()` cannot be relied on to
+    ///      commit the link.
+    function test_Link_IsStillLostWheneverOpenRevertsForAnyReason() public {
         apass.rotateKycHash(alice, ALICE_V2);
 
         vm.prank(alice);
@@ -244,45 +325,6 @@ contract ReissuedCredentialsTest is Fixture {
 
         address[] memory wallets = registry.walletsOf(KYC_LP2);
         assertEq(wallets.length, 2, "the victim's record now names the attacker's wallet");
-    }
-
-    /// @dev BUG (high). `linkIdentity` re-parents a KYC hash inside the registry, but nothing
-    ///      re-parents `drawnByIdentity`, which lives in the credit manager. Any link created AFTER a
-    ///      hash has already borrowed strands that debt under a key the protocol never consults
-    ///      again — and the identity gets a whole fresh line.
-    ///
-    ///      No revert trick and no backfill is needed: two wallets of the same person can legitimately
-    ///      hold the same current `kycHash` with different `previousKycHash` values, because the
-    ///      previous hash is a property of the wallet's own credential history. Whichever wallet
-    ///      draws first decides which key the debt lands on.
-    function test_BUG_Exposure_StrandedWhenAHashIsLinkedAfterItHasAlreadyBorrowed() public {
-        bytes32 shared = keccak256("kyc:twins:current");
-        bytes32 older = keccak256("kyc:twins:previous");
-
-        address w1 = makeAddr("twinNoPrevious");
-        address w2 = makeAddr("twinWithPrevious");
-        onboard(w1, 50, 0, shared, START_BALANCE);
-        onboard(w2, 50, 0, shared, START_BALANCE);
-        apass.setPreviousKycHash(w2, older);
-
-        // The wallet whose credential carries no previous hash draws the whole line.
-        vm.prank(w1);
-        manager.open(LINE_TIER50, TERM);
-        assertEq(manager.drawnByIdentity(shared), LINE_TIER50);
-        assertEq(manager.quote(w1, 1e6, TERM).maxDrawNow, 0, "correctly maxed out");
-
-        // The sibling wallet re-parents the identity onto a hash that has never borrowed anything.
-        assertEq(manager.quote(w2, 1e6, TERM).maxDrawNow, LINE_TIER50, "line reset by the link");
-        vm.prank(w2);
-        manager.open(LINE_TIER50, TERM);
-
-        assertEq(registry.canonicalIdentity(shared), older, "re-parented");
-        assertEq(manager.drawnByIdentity(shared), LINE_TIER50, "the first draw is stranded here");
-        assertEq(manager.drawnByIdentity(older), LINE_TIER50, "and a fresh line was drawn here");
-        assertEq(pool.outstandingPrincipal(), 2 * LINE_TIER50, "one person, twice the cap");
-
-        // The registry's own history did merge -- it is only the exposure counter that is stranded.
-        assertEq(historyOf(older).loansOriginated, 2, "history followed the link");
     }
 
     /// @dev The depth of the supersession chain is attacker-controllable: using a newer-generation

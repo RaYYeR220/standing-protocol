@@ -12,6 +12,7 @@ import {CreditManager} from "../src/CreditManager.sol";
 contract Deploy is Script {
     address constant APASS_REGISTRY = 0xbA82D189540CaC9DC6FF46B6837CaC1BFdEC58B9;
     address constant POLICY = 0x36489bE45fa84f70a0c2BDB11D824Be608CB12Dd;
+    address constant VALIDATOR = 0xaC7e5179C2C7f03f209136886c172eb34F161792;
     address constant AUSDC = 0xaC0893567D43C3E7e6e35a72803df05416C1f20D;
 
     /// @dev Protocol ceilings. Fixed at deployment and unraisable afterwards.
@@ -22,6 +23,7 @@ contract Deploy is Script {
     function run() external {
         address apass = vm.envOr("APASS_REGISTRY", APASS_REGISTRY);
         address policy = vm.envOr("POLICY", POLICY);
+        address validator = vm.envOr("VALIDATOR", VALIDATOR);
         address asset = vm.envOr("VERIFIED_ASSET", AUSDC);
 
         uint256 pk = vm.envUint("PRIVATE_KEY");
@@ -30,12 +32,13 @@ contract Deploy is Script {
         vm.startBroadcast(pk);
 
         StandingRegistry registry = new StandingRegistry(admin);
-        StandingPool pool = new StandingPool(asset, apass, policy, admin);
+        StandingPool pool = new StandingPool(asset, apass, policy, validator, admin);
         CreditManager manager = new CreditManager(
             address(pool),
             address(registry),
             apass,
             policy,
+            validator,
             asset,
             admin,
             MAX_LOAN_PRINCIPAL,
@@ -59,6 +62,7 @@ contract Deploy is Script {
         console.log("CREDIT_MANAGER=%s", address(manager));
         console.log("APASS_REGISTRY=%s", apass);
         console.log("POLICY=%s", policy);
+        console.log("VALIDATOR=%s", validator);
         console.log("VERIFIED_ASSET=%s", asset);
     }
 }

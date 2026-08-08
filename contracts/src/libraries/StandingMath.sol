@@ -24,8 +24,11 @@ library StandingMath {
     ///      verified balance, clears it on identity alone — at the maximum collateral the curve
     ///      allows. A protocol whose entry threshold required a repayment history could never
     ///      originate the first loan, and one that admitted anyone with a credential would be
-    ///      lending on the strength of a checkbox.
-    uint256 internal constant MIN_SCORE = 350;
+    ///      lending on the strength of a checkbox. Cleanverse's standard bank verification lands at
+    ///      tier 50, and that borrower clears this threshold once they hold a real verified balance
+    ///      — at 79% collateral and a five-figure-cents line, which is exactly where a first-time
+    ///      unsecured borrower belongs.
+    uint256 internal constant MIN_SCORE = 300;
 
     /// @dev Component ceilings. They sum to MAX_SCORE.
     uint256 internal constant IDENTITY_MAX = 400;
@@ -93,10 +96,12 @@ library StandingMath {
     /// @param h This protocol's record for the identity behind that credential.
     /// @param verifiedBalance The borrower's balance of the verified asset.
     /// @param nowTs Current block timestamp.
+    /// @param walletDefaults Write-offs recorded against the borrowing wallet itself.
     function score(
         ApassReader.Credential memory c,
         StandingRegistry.History memory h,
         uint256 verifiedBalance,
+        uint256 walletDefaults,
         uint256 nowTs
     ) internal pure returns (Breakdown memory b) {
         // A credential that is missing, frozen or expired scores zero. There is no partial credit
@@ -117,7 +122,12 @@ library StandingMath {
         uint256 volumeUnits = h.totalRepaid / (1000 * ASSET_UNIT);
         if (volumeUnits > VOLUME_CAP) volumeUnits = VOLUME_CAP;
         b.volumePoints = volumeUnits * VOLUME_POINTS;
-        b.defaultPenalty = uint256(h.loansDefaulted) * DEFAULT_PENALTY;
+        // The worse of the two counts, never their sum: a single write-off is recorded against
+        // both the identity and the wallet, and must be paid for once. Taking the maximum means
+        // neither record can be shed by escaping the other.
+        uint256 defaults =
+            uint256(h.loansDefaulted) > walletDefaults ? uint256(h.loansDefaulted) : walletDefaults;
+        b.defaultPenalty = defaults * DEFAULT_PENALTY;
         uint256 historyGross = _cap(b.repaymentPoints + b.volumePoints, HISTORY_MAX);
         b.historySubtotal = historyGross > b.defaultPenalty ? historyGross - b.defaultPenalty : 0;
 
@@ -160,7 +170,7 @@ library StandingMath {
         if (tier >= 90) return TIER_MAX;
         if (tier >= 75) return 265;
         if (tier >= 60) return 230;
-        if (tier >= 45) return 190;
+        if (tier >= 45) return 210;
         if (tier >= 30) return 140;
         if (tier >= 15) return 80;
         if (tier > 0) return 30;

@@ -207,11 +207,11 @@ contract CapsTest is Fixture {
 
         vm.expectRevert(StandingPool.NotCreditManager.selector);
         vm.prank(stranger);
-        pool.settleRepayment(1, 0);
+        pool.collectRepayment(stranger, 1, 0);
 
         vm.expectRevert(StandingPool.NotCreditManager.selector);
         vm.prank(stranger);
-        pool.absorbLoss(1);
+        pool.collectSeizure(stranger, 1, 0);
     }
 
     function test_RegistryWrites_AreRoleGated() public {

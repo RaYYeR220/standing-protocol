@@ -11,10 +11,10 @@ contract HappyPathTest is Fixture {
     uint256 internal constant PRINCIPAL = 5_000e6;
     uint256 internal constant TERM = 180 days;
 
-    /// @dev 5_000e6 * 6277 / 10_000
-    uint256 internal constant COLLATERAL = 3_138_500_000;
-    /// @dev 5_000e6 * 2070 * 180 days / (10_000 * 365 days), computed independently.
-    uint256 internal constant INTEREST = 510_410_958;
+    /// @dev 5_000e6 * 5600 / 10_000
+    uint256 internal constant COLLATERAL = 2_800e6;
+    /// @dev 5_000e6 * 1900 * 180 days / (10_000 * 365 days), computed independently.
+    uint256 internal constant INTEREST = 468_493_150;
 
     function test_Quote_MatchesTheTermsTheContractWillActuallyEnforce() public {
         seedPool(DEPOSIT);

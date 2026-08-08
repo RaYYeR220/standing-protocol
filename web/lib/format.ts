@@ -105,6 +105,19 @@ export function shortError(err: unknown): string {
   return raw.replace(/\s+/g, " ").trim().slice(0, 240);
 }
 
+/**
+ * The 4-byte selector a revert carried, when the callee's error is not in any ABI
+ * we hold. The selector is the only honest thing to show in that case.
+ */
+export function revertSelector(err: unknown): string | null {
+  const e = err as { metaMessages?: string[]; shortMessage?: string; message?: string };
+  const hay = [e?.shortMessage, ...(e?.metaMessages ?? []), e?.message]
+    .filter(Boolean)
+    .join(" ");
+  const m = hay.match(/0x[0-9a-fA-F]{8}\b/);
+  return m ? m[0] : null;
+}
+
 export function isAddressish(s: string) {
   return /^0x[0-9a-fA-F]{40}$/.test(s.trim());
 }

@@ -33,6 +33,27 @@ interface ICleanversePolicy {
     function apass() external view returns (address);
 }
 
+/// @notice The Cleanverse compliance validator — the contract behind `/validator/verify`.
+/// @dev Deployed at 0xaC7e5179C2C7f03f209136886c172eb34F161792 on Monad. Distinct from the token
+///      policy: the policy carries the rules of an asset, the validator carries the rules of a
+///      *registered contract*. `POST /validator/register` binds a rule set to a protocol's address,
+///      and from then on the verdict for that protocol is evaluated here.
+///
+///      This is what makes a protocol a first-class subject of the compliance system rather than a
+///      consumer of it: an operator tightens a rule at Cleanverse and the answer below changes in
+///      the next block, with no redeploy and no code change. We verified exactly that — raising
+///      `min_tier` to 60 flipped the verdict for a tier-50 wallet from 1 to 0 on-chain.
+interface ICleanverseValidator {
+    /// @notice Whether a contract has been registered as a policy subject and carries rules.
+    function isRegistered(address subject) external view returns (bool);
+
+    /// @notice The A-Pass registry this validator evaluates credentials against.
+    function apass() external view returns (address);
+
+    /// @notice The token policy contract this validator defers to for asset-level rules.
+    function tokenPolicy() external view returns (address);
+}
+
 /// @notice The Cleanverse A-Pass registry — Cleanverse Verified Identity (CVI).
 /// @dev Deployed at 0xbA82D189540CaC9DC6FF46B6837CaC1BFdEC58B9 on Monad (and Base).
 ///      A-Pass is a non-transferable ERC-721 credential whose `tokenId` is `uint160(holder)`.

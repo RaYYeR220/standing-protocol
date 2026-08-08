@@ -13,7 +13,7 @@ contract DefaultTest is Fixture {
     uint256 internal constant DEPOSIT = 200_000e6;
     uint256 internal constant PRINCIPAL = 5_000e6;
     uint256 internal constant TERM = 30 days;
-    uint256 internal constant COLLATERAL = 3_138_500_000; // 62.77% of 5_000e6
+    uint256 internal constant COLLATERAL = 2_800e6; // 56% of 5_000e6
     uint256 internal constant SHORTFALL = PRINCIPAL - COLLATERAL;
 
     function setUp() public override {
@@ -197,12 +197,12 @@ contract DefaultTest is Fixture {
         CreditManager.Quote memory q = manager.quote(vipC, 1_000e6, TERM);
         assertEq(q.score, SCORE_VIP - StandingMath.DEFAULT_PENALTY, "score dropped by the penalty");
         assertLt(q.creditLine, lineBefore, "a fresh wallet gets a smaller line");
-        // 650 - 250 = 400, i.e. 50 points above MIN_SCORE on a 650-point span.
-        assertEq(q.creditLine, 8_461_538_461, "barely above the floor of the curve");
+        // 650 - 250 = 400, i.e. 100 points above MIN_SCORE on a 700-point span.
+        assertEq(q.creditLine, 11_428_571_428, "close to the floor of the curve");
         assertGt(q.collateralRequired, 0, "and has to post collateral again");
 
         // It can still borrow -- but at a third of the size and with collateral again.
-        assertLt(q.creditLine * 3, LINE_VIP, "the line is cut by more than two thirds");
+        assertLt(q.creditLine * 2, LINE_VIP, "the line is cut by more than half");
         vm.prank(vipC);
         uint256 second = manager.open(q.creditLine, TERM);
         assertEq(manager.loan(second).principal, q.creditLine);

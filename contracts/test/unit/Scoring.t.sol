@@ -55,8 +55,8 @@ contract ScoringTest is Test {
         if (tierA > tierB) (tierA, tierB) = (tierB, tierA);
 
         StandingRegistry.History memory h = _hist(repaid, defaulted, 0);
-        uint256 low = StandingMath.score(_cred(tierA, subTier, 0), h, balance, NOW).score;
-        uint256 high = StandingMath.score(_cred(tierB, subTier, 0), h, balance, NOW).score;
+        uint256 low = StandingMath.score(_cred(tierA, subTier, 0), h, balance, 0, NOW).score;
+        uint256 high = StandingMath.score(_cred(tierB, subTier, 0), h, balance, 0, NOW).score;
 
         assertLe(low, high, "a better-verified identity must never score worse");
     }
@@ -74,8 +74,8 @@ contract ScoringTest is Test {
 
         StandingRegistry.History memory h = _hist(0, 0, 0);
         assertLe(
-            StandingMath.score(_cred(tier, subA, 0), h, balance, NOW).score,
-            StandingMath.score(_cred(tier, subB, 0), h, balance, NOW).score
+            StandingMath.score(_cred(tier, subA, 0), h, balance, 0, NOW).score,
+            StandingMath.score(_cred(tier, subB, 0), h, balance, 0, NOW).score
         );
     }
 
@@ -89,8 +89,8 @@ contract ScoringTest is Test {
         if (ageA > ageB) (ageA, ageB) = (ageB, ageA);
 
         StandingRegistry.History memory h = _hist(0, 0, 0);
-        uint256 younger = StandingMath.score(_cred(tier, 0, uint64(NOW - ageA)), h, 0, NOW).score;
-        uint256 older = StandingMath.score(_cred(tier, 0, uint64(NOW - ageB)), h, 0, NOW).score;
+        uint256 younger = StandingMath.score(_cred(tier, 0, uint64(NOW - ageA)), h, 0, 0, NOW).score;
+        uint256 older = StandingMath.score(_cred(tier, 0, uint64(NOW - ageB)), h, 0, 0, NOW).score;
 
         assertLe(younger, older, "an older credential must never score worse");
     }
@@ -106,8 +106,8 @@ contract ScoringTest is Test {
         if (repaidA > repaidB) (repaidA, repaidB) = (repaidB, repaidA);
 
         ApassReader.Credential memory c = _cred(tier, 0, 0);
-        uint256 fewer = StandingMath.score(c, _hist(repaidA, defaulted, 0), balance, NOW).score;
-        uint256 more = StandingMath.score(c, _hist(repaidB, defaulted, 0), balance, NOW).score;
+        uint256 fewer = StandingMath.score(c, _hist(repaidA, defaulted, 0), balance, 0, NOW).score;
+        uint256 more = StandingMath.score(c, _hist(repaidB, defaulted, 0), balance, 0, NOW).score;
 
         assertLe(fewer, more, "paying loans back must never hurt");
     }
@@ -123,8 +123,8 @@ contract ScoringTest is Test {
 
         ApassReader.Credential memory c = _cred(tier, 0, 0);
         assertLe(
-            StandingMath.score(c, _hist(0, defaulted, volA), 0, NOW).score,
-            StandingMath.score(c, _hist(0, defaulted, volB), 0, NOW).score
+            StandingMath.score(c, _hist(0, defaulted, volA), 0, 0, NOW).score,
+            StandingMath.score(c, _hist(0, defaulted, volB), 0, 0, NOW).score
         );
     }
 
@@ -142,8 +142,8 @@ contract ScoringTest is Test {
         StandingRegistry.History memory h = _hist(repaid, defaulted, 0);
 
         assertLe(
-            StandingMath.score(c, h, balA, NOW).score,
-            StandingMath.score(c, h, balB, NOW).score,
+            StandingMath.score(c, h, balA, 0, NOW).score,
+            StandingMath.score(c, h, balB, 0, NOW).score,
             "more verified capital must never hurt"
         );
     }
@@ -161,9 +161,9 @@ contract ScoringTest is Test {
         defaulted = uint32(bound(defaulted, 0, type(uint32).max - 1));
 
         ApassReader.Credential memory c = _cred(tier, subTier, 0);
-        uint256 before = StandingMath.score(c, _hist(repaid, defaulted, volume), balance, NOW).score;
+        uint256 before = StandingMath.score(c, _hist(repaid, defaulted, volume), balance, 0, NOW).score;
         uint256 afterOneMore =
-            StandingMath.score(c, _hist(repaid, defaulted + 1, volume), balance, NOW).score;
+            StandingMath.score(c, _hist(repaid, defaulted + 1, volume), balance, 0, NOW).score;
 
         assertLe(afterOneMore, before, "a write-off must never improve standing");
     }
@@ -177,8 +177,8 @@ contract ScoringTest is Test {
         repaid = uint32(bound(repaid, 0, 50));
 
         ApassReader.Credential memory c = _cred(tier, 0, 0);
-        uint256 clean = StandingMath.score(c, _hist(repaid, 0, 0), balance, NOW).score;
-        uint256 dirty = StandingMath.score(c, _hist(repaid, 1, 0), balance, NOW).score;
+        uint256 clean = StandingMath.score(c, _hist(repaid, 0, 0), balance, 0, NOW).score;
+        uint256 dirty = StandingMath.score(c, _hist(repaid, 1, 0), balance, 0, NOW).score;
 
         // The penalty is applied to the whole score, so it is never diluted by the history cap.
         uint256 expectedDrop = clean < StandingMath.DEFAULT_PENALTY ? clean : StandingMath.DEFAULT_PENALTY;
@@ -200,7 +200,7 @@ contract ScoringTest is Test {
         issuedAt = uint64(bound(issuedAt, 0, NOW));
 
         uint256 s =
-            StandingMath.score(_cred(tier, subTier, issuedAt), _hist(repaid, 0, volume), balance, NOW).score;
+            StandingMath.score(_cred(tier, subTier, issuedAt), _hist(repaid, 0, volume), balance, 0, NOW).score;
         assertLe(s, StandingMath.MAX_SCORE, "score is bounded");
     }
 
@@ -215,17 +215,17 @@ contract ScoringTest is Test {
 
         ApassReader.Credential memory c = _cred(tier, 99, 0);
         c.status = status;
-        assertEq(StandingMath.score(c, _hist(repaid, 0, 0), balance, NOW).score, 0, "frozen scores zero");
+        assertEq(StandingMath.score(c, _hist(repaid, 0, 0), balance, 0, NOW).score, 0, "frozen scores zero");
 
         ApassReader.Credential memory expired = _cred(tier, 99, 0);
         expired.expiresAt = uint64(NOW);
         assertEq(
-            StandingMath.score(expired, _hist(repaid, 0, 0), balance, NOW).score, 0, "expired scores zero"
+            StandingMath.score(expired, _hist(repaid, 0, 0), balance, 0, NOW).score, 0, "expired scores zero"
         );
 
         ApassReader.Credential memory missing;
         assertEq(
-            StandingMath.score(missing, _hist(repaid, 0, 0), balance, NOW).score, 0, "absent scores zero"
+            StandingMath.score(missing, _hist(repaid, 0, 0), balance, 0, NOW).score, 0, "absent scores zero"
         );
     }
 
@@ -303,5 +303,76 @@ contract ScoringTest is Test {
     function testFuzz_AssetPoints_SmallBalancesCannotReachTheCeiling(uint256 balance) public pure {
         balance = bound(balance, 0, 100_000 * StandingMath.ASSET_UNIT - 1);
         assertLt(StandingMath._assetPoints(balance), 250, "only a six-figure balance maxes the bucket");
+    }
+
+    // ------------------------------------------------------------------ wallet-sticky defaults
+
+    /// @dev The penalty is the worse of the two records, never the sum: a write-off is paid for once
+    ///      whichever way it is discovered, and neither record can be shed by escaping the other.
+    function testFuzz_Score_PenaltyIsTheWorseOfIdentityAndWalletRecords(
+        uint8 tier,
+        uint32 identityDefaults,
+        uint32 walletDefaults,
+        uint96 balance
+    ) public pure {
+        tier = uint8(bound(tier, 0, 99));
+        identityDefaults = uint32(bound(identityDefaults, 0, 8));
+        walletDefaults = uint32(bound(walletDefaults, 0, 8));
+
+        ApassReader.Credential memory c = _cred(tier, 0, 0);
+        uint256 combined =
+            StandingMath.score(c, _hist(0, identityDefaults, 0), balance, walletDefaults, NOW).score;
+
+        uint32 worse = identityDefaults > walletDefaults ? identityDefaults : walletDefaults;
+        uint256 asIfOnlyIdentity = StandingMath.score(c, _hist(0, worse, 0), balance, 0, NOW).score;
+
+        assertEq(combined, asIfOnlyIdentity, "max(identity, wallet), not the sum");
+    }
+
+    /// @dev A clean identity plus a dirty wallet is still a refusal, and vice versa.
+    function testFuzz_Score_EitherRecordAloneCarriesTheFullPenalty(uint8 tier, uint96 balance)
+        public
+        pure
+    {
+        tier = uint8(bound(tier, 0, 99));
+        ApassReader.Credential memory c = _cred(tier, 0, 0);
+
+        uint256 clean = StandingMath.score(c, _hist(0, 0, 0), balance, 0, NOW).score;
+        uint256 identityOnly = StandingMath.score(c, _hist(0, 1, 0), balance, 0, NOW).score;
+        uint256 walletOnly = StandingMath.score(c, _hist(0, 0, 0), balance, 1, NOW).score;
+        uint256 both = StandingMath.score(c, _hist(0, 1, 0), balance, 1, NOW).score;
+
+        assertEq(identityOnly, walletOnly, "either record alone costs the same");
+        assertEq(both, identityOnly, "and holding both costs no more");
+        assertLe(identityOnly, clean, "a write-off never helps");
+    }
+
+    /// @dev Two write-offs on two wallets of one identity are both counted by the identity record,
+    ///      so `max` does not under-count them: the identity side already holds the total.
+    function test_Score_TwoWalletsOfOneIdentityAreNotUnderCounted() public pure {
+        ApassReader.Credential memory c = _cred(99, 99, 0);
+
+        // Identity carries both; each wallet carries only its own.
+        uint256 seenFromWalletOne = StandingMath.score(c, _hist(0, 2, 0), 0, 1, NOW).score;
+        uint256 twoDefaultsFlat = StandingMath.score(c, _hist(0, 2, 0), 0, 0, NOW).score;
+
+        assertEq(seenFromWalletOne, twoDefaultsFlat, "the identity total dominates");
+        assertLt(seenFromWalletOne, StandingMath.score(c, _hist(0, 1, 0), 0, 1, NOW).score, "two costs more than one");
+    }
+
+    function testFuzz_Score_MoreWalletDefaultsNeverRaisesTheScore(
+        uint8 tier,
+        uint32 walletDefaults,
+        uint96 balance
+    ) public pure {
+        tier = uint8(bound(tier, 0, 99));
+        walletDefaults = uint32(bound(walletDefaults, 0, type(uint32).max - 1));
+
+        ApassReader.Credential memory c = _cred(tier, 0, 0);
+        assertLe(
+            StandingMath.score(c, _hist(0, 0, 0), balance, walletDefaults + 1, NOW).score,
+            StandingMath.score(c, _hist(0, 0, 0), balance, walletDefaults, NOW).score,
+            "a wallet write-off must never improve standing"
+        );
     }
 }

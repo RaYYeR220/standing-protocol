@@ -55,6 +55,44 @@ contract StandingInvariantsTest is Fixture {
         }
     }
 
+    /// @notice Every Active loan can still be closed, and the exposure counter it will decrement
+    ///         holds exactly the loans that resolve to it.
+    /// @dev Settlement decrements `drawnByIdentity[canonicalIdentity(l.kycHash)]`, while identity
+    ///      links move exposure between keys underneath outstanding loans. This is the property that
+    ///      says the two have not drifted apart: for every identity an active loan resolves to, the
+    ///      counter equals the sum of those loans' principals — no more, no less. If it were ever
+    ///      short, `repay` and `markDefault` would both underflow and the loan would be frozen for
+    ///      good; if it were ever long, exposure would have been double counted.
+    function invariant_EveryActiveLoanCanStillBeSettled() public view {
+        uint256 n = manager.loanCount();
+        for (uint256 i = 1; i <= n; i++) {
+            CreditManager.Loan memory li = manager.loan(i);
+            if (li.status != CreditManager.Status.Active) continue;
+
+            bytes32 root = registry.canonicalIdentity(li.kycHash);
+
+            // Only evaluate each root once: the first active loan that resolves to it.
+            bool alreadySeen;
+            for (uint256 j = 1; j < i; j++) {
+                CreditManager.Loan memory lj = manager.loan(j);
+                if (lj.status != CreditManager.Status.Active) continue;
+                if (registry.canonicalIdentity(lj.kycHash) == root) {
+                    alreadySeen = true;
+                    break;
+                }
+            }
+            if (alreadySeen) continue;
+
+            uint256 owed;
+            for (uint256 j = 1; j <= n; j++) {
+                CreditManager.Loan memory lj = manager.loan(j);
+                if (lj.status != CreditManager.Status.Active) continue;
+                if (registry.canonicalIdentity(lj.kycHash) == root) owed += lj.principal;
+            }
+            assertEq(manager.drawnByIdentity(root), owed, "exposure drifted from the active loans");
+        }
+    }
+
     /// @notice Every loan the protocol wrote is at or above the minimum principal.
     function invariant_NoLoanIsBelowTheMinimumPrincipal() public view {
         uint256 n = manager.loanCount();
@@ -119,6 +157,7 @@ contract StandingInvariantsTest is Fixture {
         console.log("repayments  ", handler.ghostRepays());
         console.log("write-offs  ", handler.ghostDefaults());
         console.log("re-issues   ", handler.ghostReissues());
+        console.log("syncs       ", handler.ghostSyncs());
         console.log("loans       ", manager.loanCount());
     }
 }
