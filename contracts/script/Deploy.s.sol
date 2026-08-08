@@ -43,7 +43,7 @@ contract Deploy is Script {
             MAX_TERM
         );
 
-        pool.grantRole(pool.CREDIT_MANAGER_ROLE(), address(manager));
+        pool.setCreditManager(address(manager));
         registry.grantRole(registry.RECORDER_ROLE(), address(manager));
 
         // The credit history is the collateral, so nobody — including the deployer — may write to

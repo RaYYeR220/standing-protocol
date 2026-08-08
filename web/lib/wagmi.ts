@@ -1,5 +1,7 @@
-import { createConfig, http } from "wagmi";
-import { injected } from "wagmi/connectors";
+// `injected` is imported from the wagmi root rather than `wagmi/connectors`: the
+// connectors barrel drags in the whole hosted-wallet SDK tree, which this console
+// has no use for and which does not resolve cleanly in a browser bundle.
+import { createConfig, http, injected } from "wagmi";
 import { monadTestnet, MONAD_RPC } from "./chain";
 
 export const wagmiConfig = createConfig({

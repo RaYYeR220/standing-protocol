@@ -12,6 +12,8 @@
   --color-panel: #111721;
   --color-panel-sunk: #0c1119;
   --color-panel-lift: #161e2a;
+  /* An unbuilt pillar: present in the silhouette, plainly not standing. */
+  --color-panel-unlit: #1d2733;
 
   --color-line: #1c2531;
   --color-line-lift: #263243;
@@ -322,11 +324,12 @@
 
   /* Leader dots so a label and its number read as one line of evidence. */
   .leader {
-    flex: 1;
+    flex: 1 1 1.5rem;
+    align-self: flex-start;
+    margin-top: 0.4em;
     height: 0;
     border-bottom: 1px dotted var(--color-bone-ghost);
-    transform: translateY(-0.25em);
-    min-width: 1rem;
+    min-width: 0.75rem;
   }
 }
 

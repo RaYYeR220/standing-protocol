@@ -277,4 +277,31 @@ contract ScoringTest is Test {
         assertEq(topTerms.collateralBps, 0);
         assertEq(topTerms.aprBps, 500);
     }
+
+    // ------------------------------------------------------------------ asset ladder
+
+    function test_AssetPoints_IsABaseTenLadder() public pure {
+        assertEq(StandingMath._assetPoints(0), 0, "nothing");
+        assertEq(StandingMath._assetPoints(1e6 - 1), 0, "under one unit");
+        assertEq(StandingMath._assetPoints(1e6), 20, "1 aUSDC");
+        assertEq(StandingMath._assetPoints(10e6 - 1), 20, "just under 10");
+        assertEq(StandingMath._assetPoints(10e6), 50, "10 aUSDC");
+        assertEq(StandingMath._assetPoints(100e6), 100, "100 aUSDC");
+        assertEq(StandingMath._assetPoints(1_000e6), 150, "1k aUSDC");
+        assertEq(StandingMath._assetPoints(10_000e6), 200, "10k aUSDC");
+        assertEq(StandingMath._assetPoints(100_000e6), 250, "100k aUSDC");
+        assertEq(StandingMath._assetPoints(type(uint256).max), 250, "capped");
+    }
+
+    function testFuzz_AssetPoints_IsMonotonic(uint256 a, uint256 b) public pure {
+        if (a > b) (a, b) = (b, a);
+        assertLe(StandingMath._assetPoints(a), StandingMath._assetPoints(b), "ladder never descends");
+    }
+
+    /// @dev The ladder is what stops a trivial balance buying a full asset score. Ten dollars is now
+    ///      worth 50 points, not 250, and a tier-50 identity needs a real balance to clear MIN_SCORE.
+    function testFuzz_AssetPoints_SmallBalancesCannotReachTheCeiling(uint256 balance) public pure {
+        balance = bound(balance, 0, 100_000 * StandingMath.ASSET_UNIT - 1);
+        assertLt(StandingMath._assetPoints(balance), 250, "only a six-figure balance maxes the bucket");
+    }
 }

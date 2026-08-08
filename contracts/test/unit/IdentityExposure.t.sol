@@ -55,21 +55,19 @@ contract IdentityExposureTest is Fixture {
         assertEq(pool.outstandingPrincipal(), LINE_TIER50, "and that is all the pool lent");
 
         // A third attempt from either wallet, however small, is refused.
-        vm.expectRevert(abi.encodeWithSelector(CreditManager.ExceedsCreditLine.selector, 1, 0));
+        uint256 min = manager.MIN_LOAN_PRINCIPAL();
+        vm.expectRevert(abi.encodeWithSelector(CreditManager.ExceedsCreditLine.selector, min, 0));
         vm.prank(alice);
-        manager.open(1, 30 days);
+        manager.open(min, 30 days);
 
-        vm.expectRevert(abi.encodeWithSelector(CreditManager.ExceedsCreditLine.selector, 1, 0));
+        vm.expectRevert(abi.encodeWithSelector(CreditManager.ExceedsCreditLine.selector, min, 0));
         vm.prank(aliceB);
-        manager.open(1, 30 days);
+        manager.open(min, 30 days);
     }
 
     function test_NewWalletOfTheSameIdentityInheritsTheLineImmediately() public {
         address aliceC = makeAddr("aliceC");
-        issueCredential(aliceC, 50, 0, KYC_ALICE);
-        asset.mint(aliceC, 100_000e6);
-        vm.prank(aliceC);
-        asset.approve(address(manager), type(uint256).max);
+        onboard(aliceC, 50, 0, KYC_ALICE, START_BALANCE);
 
         vm.prank(alice);
         manager.open(LINE_TIER50, 30 days);
@@ -134,8 +132,9 @@ contract IdentityExposureTest is Fixture {
     /// @dev A wallet holding a huge verified balance scores higher, but the extra headroom is still
     ///      netted against the identity's existing draw rather than granted afresh.
     function test_RicherWalletOfTheSameIdentityGetsHeadroomNotAFreshLine() public {
-        // vip and vipB share KYC_VIP. Strip vipB's balance so the two wallets score differently.
-        uint256 drain = asset.balanceOf(vipB) - 1e6;
+        // vip and vipB share KYC_VIP. Drop vipB two rungs down the asset ladder so the two wallets
+        // score differently: 1_000 aUSDC is worth 150 points against vip's 250.
+        uint256 drain = asset.balanceOf(vipB) - 1_000e6;
         vm.prank(vipB);
         asset.transfer(stranger, drain);
 
@@ -143,13 +142,18 @@ contract IdentityExposureTest is Fixture {
         uint256 poorLine = manager.quote(vipB, 1e6, 30 days).creditLine;
         assertGt(richLine, poorLine, "the funded wallet scores higher");
 
+        // One draw at the per-loan ceiling already exceeds everything the poorer wallet is good for.
+        uint256 first = manager.quote(vip, 1e6, 30 days).maxDrawNow;
+        assertGt(first, poorLine, "a single draw outruns the poorer wallet's whole line");
         vm.prank(vip);
-        manager.open(richLine, 30 days);
+        manager.open(first, 30 days);
+        assertEq(manager.drawnByIdentity(KYC_VIP), first, "one shared exposure counter");
 
         // The poorer wallet's line is already more than exhausted by the identity's draw.
         assertEq(manager.quote(vipB, 1e6, 30 days).maxDrawNow, 0);
-        vm.expectRevert(abi.encodeWithSelector(CreditManager.ExceedsCreditLine.selector, 1, 0));
+        uint256 min = manager.MIN_LOAN_PRINCIPAL();
+        vm.expectRevert(abi.encodeWithSelector(CreditManager.ExceedsCreditLine.selector, min, 0));
         vm.prank(vipB);
-        manager.open(1, 30 days);
+        manager.open(min, 30 days);
     }
 }

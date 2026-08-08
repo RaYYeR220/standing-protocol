@@ -19,14 +19,19 @@ contract StandingHandler is Test {
 
     address[] public lenders;
     address[] public borrowers;
+    /// @dev Every KYC hash the handler has ever put into circulation, including superseded ones.
+    ///      Exposure is keyed by canonical identity, so the invariant has to be able to enumerate
+    ///      every hash that could hold a balance.
     bytes32[] public identities;
     uint256[] public loanIds;
+    mapping(address => bytes32) public currentHash;
 
     uint256 public ghostDeposits;
     uint256 public ghostWithdrawals;
     uint256 public ghostOpens;
     uint256 public ghostRepays;
     uint256 public ghostDefaults;
+    uint256 public ghostReissues;
 
     constructor(StandingPool pool_, CreditManager manager_, MockVerifiedAsset asset_, MockApass apass_) {
         pool = pool_;
@@ -73,8 +78,9 @@ contract StandingHandler is Test {
     function openLoan(uint256 actorSeed, uint256 amount, uint256 term) external {
         address who = borrowers[bound(actorSeed, 0, borrowers.length - 1)];
         uint256 headroom = manager.quote(who, 0, 0).maxDrawNow;
-        if (headroom == 0) return;
-        amount = bound(amount, 1, headroom);
+        uint256 min = manager.MIN_LOAN_PRINCIPAL();
+        if (headroom < min) return;
+        amount = bound(amount, min, headroom);
         // Short terms on purpose: the fuzzer has to be able to reach maturity, grace expiry and a
         // write-off inside a single run.
         term = bound(term, manager.MIN_TERM_SECONDS(), 30 days);
@@ -108,6 +114,17 @@ contract StandingHandler is Test {
         vm.warp(block.timestamp + bound(dt, 1 hours, 45 days));
     }
 
+    /// @dev Cleanverse re-issues a credential under a fresh KYC hash when a holder re-verifies. The
+    ///      protocol is supposed to stitch the two together, so the fuzzer has to be able to do it.
+    function reissueCredential(uint256 actorSeed, uint256 salt) external {
+        address who = borrowers[bound(actorSeed, 0, borrowers.length - 1)];
+        bytes32 next = keccak256(abi.encode("handler:reissue", who, salt, ghostReissues));
+        apass.rotateKycHash(who, next);
+        identities.push(next);
+        currentHash[who] = next;
+        ghostReissues += 1;
+    }
+
     // ------------------------------------------------------------------ views
 
     function identitiesLength() external view returns (uint256) {
@@ -137,6 +154,7 @@ contract StandingHandler is Test {
     }
 
     function _onboard(address who, bytes32 kycHash) private {
+        currentHash[who] = kycHash;
         // A very distant expiry, so time-travel in the fuzzer does not silently disable every actor.
         apass.issue(who, 1, 80, 50, block.timestamp + 3650 days, block.timestamp - 365 days, kycHash);
         asset.mint(who, 5_000_000e6);

@@ -76,7 +76,7 @@ contract Demo is Script {
             address(pool), address(registry), APASS, POLICY, AUSDC, admin,
             MAX_LOAN_PRINCIPAL, MAX_CREDIT_LINE, MAX_TERM
         );
-        pool.grantRole(pool.CREDIT_MANAGER_ROLE(), address(manager));
+        pool.setCreditManager(address(manager));
         registry.grantRole(registry.RECORDER_ROLE(), address(manager));
         registry.renounceRole(registry.DEFAULT_ADMIN_ROLE(), admin);
         vm.stopPrank();

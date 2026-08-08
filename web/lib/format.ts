@@ -82,12 +82,27 @@ export function durationLabel(seconds: number) {
   return `${d}d`;
 }
 
-/** Pulls the most useful line out of a viem error without dumping a stack. */
+/**
+ * Pulls the useful part out of a viem error without dumping a stack. A bare
+ * `shortMessage` on a revert often ends in a colon, so the meta lines that carry
+ * the actual selector are kept — that selector is the evidence.
+ */
 export function shortError(err: unknown): string {
   if (!err) return "unknown error";
-  const e = err as { shortMessage?: string; details?: string; message?: string; name?: string };
-  const raw = e.shortMessage || e.details || e.message || e.name || String(err);
-  return raw.split("\n")[0].slice(0, 200);
+  const e = err as {
+    shortMessage?: string;
+    metaMessages?: string[];
+    details?: string;
+    message?: string;
+    name?: string;
+  };
+  const parts: string[] = [];
+  if (e.shortMessage) parts.push(e.shortMessage);
+  if (Array.isArray(e.metaMessages)) parts.push(...e.metaMessages.slice(0, 2));
+  const raw = parts.length
+    ? parts.join(" ")
+    : e.details || e.message || e.name || String(err);
+  return raw.replace(/\s+/g, " ").trim().slice(0, 240);
 }
 
 export function isAddressish(s: string) {

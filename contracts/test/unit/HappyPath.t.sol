@@ -11,10 +11,10 @@ contract HappyPathTest is Fixture {
     uint256 internal constant PRINCIPAL = 5_000e6;
     uint256 internal constant TERM = 180 days;
 
-    /// @dev 5_000e6 * 7320 / 10_000
-    uint256 internal constant COLLATERAL = 3_660e6;
-    /// @dev 5_000e6 * 2330 * 180 days / (10_000 * 365 days), computed independently.
-    uint256 internal constant INTEREST = 574_520_547;
+    /// @dev 5_000e6 * 6277 / 10_000
+    uint256 internal constant COLLATERAL = 3_138_500_000;
+    /// @dev 5_000e6 * 2070 * 180 days / (10_000 * 365 days), computed independently.
+    uint256 internal constant INTEREST = 510_410_958;
 
     function test_Quote_MatchesTheTermsTheContractWillActuallyEnforce() public {
         seedPool(DEPOSIT);
@@ -29,7 +29,7 @@ contract HappyPathTest is Fixture {
         assertEq(q.maxDrawNow, LINE_TIER50, "headroom");
         assertEq(q.collateralRequired, COLLATERAL, "collateral");
         assertEq(q.interestForTerm, INTEREST, "interest");
-        assertEq(q.breakdown.identitySubtotal, 201, "identity subtotal");
+        assertEq(q.breakdown.identitySubtotal, IDENTITY_TIER50, "identity subtotal");
         assertEq(q.breakdown.assetSubtotal, 250, "asset subtotal");
         assertEq(q.breakdown.historySubtotal, 0, "history subtotal");
     }
@@ -196,10 +196,12 @@ contract HappyPathTest is Fixture {
 
         vm.prank(alice);
         uint256 loanId = manager.open(PRINCIPAL, MAX_TERM);
+        uint256 yearInterest = manager.loan(loanId).interestDue;
+        assertEq(yearInterest, PRINCIPAL * APR_BPS_TIER50 / 10_000, "a full year of interest");
         vm.warp(START_TS + registry.MIN_QUALIFYING_HOLD() - 1);
 
         vm.expectEmit(true, true, false, true, address(registry));
-        emit StandingRegistry.LoanRepaid(KYC_ALICE, alice, PRINCIPAL, INTEREST * 2, false);
+        emit StandingRegistry.LoanRepaid(KYC_ALICE, alice, PRINCIPAL, yearInterest, false);
         vm.prank(alice);
         manager.repay(loanId);
 

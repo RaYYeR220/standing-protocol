@@ -17,7 +17,7 @@ contract CapsTest is Fixture {
         seedPool(DEPOSIT);
     }
 
-    // ------------------------------------------------------------------ maxLoanPrincipal
+    // ------------------------------------------------------------------ principal bounds
 
     function test_Borrow_RevertsAboveMaxLoanPrincipal() public {
         vm.expectRevert(
@@ -37,13 +37,25 @@ contract CapsTest is Fixture {
         manager.open(0, 30 days);
     }
 
-    /// @dev `maxLoanPrincipal` binds even when the identity's line is larger. A tier-99 identity is
-    ///      good for 23_750e6 here, which is under the ceiling, so raise the line first by proving
-    ///      the ceiling is what stops a request the credit line would otherwise allow.
+    function test_Borrow_RevertsBelowMinLoanPrincipal() public {
+        uint256 min = manager.MIN_LOAN_PRINCIPAL();
+        vm.expectRevert(
+            abi.encodeWithSelector(CreditManager.ExceedsLoanCeiling.selector, min - 1, MAX_LOAN_PRINCIPAL)
+        );
+        vm.prank(alice);
+        manager.open(min - 1, 30 days);
+    }
+
+    function test_Borrow_AllowedExactlyAtMinLoanPrincipal() public {
+        uint256 min = manager.MIN_LOAN_PRINCIPAL();
+        vm.prank(alice);
+        uint256 loanId = manager.open(min, 30 days);
+        assertEq(manager.loan(loanId).principal, min);
+    }
+
+    /// @dev `maxLoanPrincipal` binds even when the identity's line is larger.
     function test_Borrow_MaxLoanPrincipalBindsBeforeTheCreditLine() public {
-        // Ten clean repayments plus a big verified balance takes this identity to the top of the
-        // curve, where the line is the full 50_000e6 -- twice the per-loan ceiling.
-        _buildPerfectRecord(vip, KYC_VIP);
+        _buildStrongRecord(vip, KYC_VIP);
 
         CreditManager.Quote memory q = manager.quote(vip, MAX_LOAN_PRINCIPAL, 30 days);
         assertGt(q.creditLine, MAX_LOAN_PRINCIPAL, "line exceeds the per-loan ceiling");
@@ -86,7 +98,9 @@ contract CapsTest is Fixture {
         asset.transfer(stranger, bal);
 
         vm.expectRevert(
-            abi.encodeWithSelector(CreditManager.BelowMinimumStanding.selector, 201, StandingMath.MIN_SCORE)
+            abi.encodeWithSelector(
+                CreditManager.BelowMinimumStanding.selector, IDENTITY_TIER50, StandingMath.MIN_SCORE
+            )
         );
         vm.prank(alice);
         manager.open(100e6, 30 days);
@@ -121,13 +135,12 @@ contract CapsTest is Fixture {
     // ------------------------------------------------------------------ pool utilization
 
     function test_Borrow_RevertsAbovePoolMaxUtilization() public {
-        _buildPerfectRecord(vip, KYC_VIP);
+        _buildStrongRecord(vip, KYC_VIP);
         vm.prank(admin);
         pool.setMaxUtilizationBps(1000); // 10% of total assets
 
         uint256 ceiling = pool.totalAssets() * 1000 / 10_000;
 
-        // First draw sits just under the ceiling.
         vm.prank(vip);
         manager.open(19_000e6, 30 days);
 
@@ -139,7 +152,7 @@ contract CapsTest is Fixture {
     }
 
     function test_Borrow_AllowedExactlyAtMaxUtilization() public {
-        _buildPerfectRecord(vip, KYC_VIP);
+        _buildStrongRecord(vip, KYC_VIP);
         vm.prank(admin);
         pool.setMaxUtilizationBps(1000);
 
@@ -150,12 +163,12 @@ contract CapsTest is Fixture {
         assertEq(pool.outstandingPrincipal(), ceiling, "exactly at the ceiling");
         assertLe(pool.utilizationBps(), 1000, "never above the ceiling");
 
-        // And not one unit more.
+        uint256 min = manager.MIN_LOAN_PRINCIPAL();
         vm.expectRevert(
-            abi.encodeWithSelector(StandingPool.UtilizationExceeded.selector, ceiling + 1, ceiling)
+            abi.encodeWithSelector(StandingPool.UtilizationExceeded.selector, ceiling + min, ceiling)
         );
         vm.prank(vipB);
-        manager.open(1, 30 days);
+        manager.open(min, 30 days);
     }
 
     function test_SetMaxUtilization_RejectsOutOfRangeValues() public {
@@ -168,10 +181,13 @@ contract CapsTest is Fixture {
         pool.setMaxUtilizationBps(10_001);
     }
 
+    // ------------------------------------------------------------------ access control
+
     function test_SetMaxUtilization_IsRoleGated() public {
+        bytes32 role = pool.RISK_ADMIN_ROLE();
         vm.expectRevert(
             abi.encodeWithSelector(
-                IAccessControl.AccessControlUnauthorizedAccount.selector, stranger, pool.RISK_ADMIN_ROLE()
+                IAccessControl.AccessControlUnauthorizedAccount.selector, stranger, role
             )
         );
         vm.prank(stranger);
@@ -179,11 +195,10 @@ contract CapsTest is Fixture {
     }
 
     function test_FundLoan_IsRoleGated() public {
+        bytes32 role = pool.CREDIT_MANAGER_ROLE();
         vm.expectRevert(
             abi.encodeWithSelector(
-                IAccessControl.AccessControlUnauthorizedAccount.selector,
-                stranger,
-                pool.CREDIT_MANAGER_ROLE()
+                IAccessControl.AccessControlUnauthorizedAccount.selector, stranger, role
             )
         );
         vm.prank(stranger);
@@ -191,15 +206,25 @@ contract CapsTest is Fixture {
     }
 
     function test_RegistryWrites_AreRoleGated() public {
+        bytes32 role = registry.RECORDER_ROLE();
         vm.expectRevert(
             abi.encodeWithSelector(
-                IAccessControl.AccessControlUnauthorizedAccount.selector,
-                stranger,
-                registry.RECORDER_ROLE()
+                IAccessControl.AccessControlUnauthorizedAccount.selector, stranger, role
             )
         );
         vm.prank(stranger);
-        registry.recordRepayment(KYC_ALICE, alice, 1_000e6, 0);
+        registry.recordRepayment(KYC_ALICE, alice, 1_000e6, 0, 365 days);
+    }
+
+    function test_LinkIdentity_IsRoleGated() public {
+        bytes32 role = registry.RECORDER_ROLE();
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector, stranger, role
+            )
+        );
+        vm.prank(stranger);
+        registry.linkIdentity(KYC_ALICE, keccak256("attacker"));
     }
 
     function test_Repay_RevertsForANonBorrower() public {
@@ -224,13 +249,14 @@ contract CapsTest is Fixture {
 
     // ------------------------------------------------------------------ helpers
 
-    /// @dev Ten repaid loans maxes the repayment bucket, which on a tier-99 identity is enough to
-    ///      push the credit line past the per-loan ceiling. Notably the loans can be 1 unit each and
-    ///      cost nothing -- see KnownBugs.t.sol#test_BUG_Score_HistoryIsFarmableWithDustLoans.
-    function _buildPerfectRecord(address wallet, bytes32 kycHash) internal {
+    /// @dev Ten qualifying repayments maxes the repayment bucket. Each loan must now be held for at
+    ///      least a day and each costs real interest, so this is time and money rather than a loop.
+    function _buildStrongRecord(address wallet, bytes32 kycHash) internal {
+        uint256 min = manager.MIN_LOAN_PRINCIPAL();
         for (uint256 i = 0; i < 10; i++) {
             vm.prank(wallet);
-            uint256 id = manager.open(1e6, 1 days);
+            uint256 id = manager.open(min, 1 days);
+            vm.warp(block.timestamp + registry.MIN_QUALIFYING_HOLD());
             vm.prank(wallet);
             manager.repay(id);
         }

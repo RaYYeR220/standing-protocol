@@ -77,10 +77,15 @@ contract StandingRegistry is AccessControl {
 
     /// @notice Resolves a KYC hash to the identity record it belongs to.
     /// @dev Follows the supersession chain. Bounded so a pathological chain cannot make reads
-    ///      un-gas-able; eight re-verifications is far beyond anything a credential does in practice.
+    ///      un-gas-able. Links written in the natural order are path-compressed to depth one, so
+    ///      depth only grows when they arrive newest-first; the bound is set far above anything
+    ///      that ordering can produce in practice, and a chain that did exceed it would resolve to
+    ///      an intermediate identity rather than to nothing.
+    uint256 public constant MAX_IDENTITY_DEPTH = 32;
+
     function canonicalIdentity(bytes32 kycHash) public view returns (bytes32) {
         bytes32 cur = kycHash;
-        for (uint256 i = 0; i < 8; ++i) {
+        for (uint256 i = 0; i < MAX_IDENTITY_DEPTH; ++i) {
             bytes32 parent = _supersedes[cur];
             if (parent == bytes32(0) || parent == cur) break;
             cur = parent;

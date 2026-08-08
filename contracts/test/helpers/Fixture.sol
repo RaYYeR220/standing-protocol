@@ -56,17 +56,20 @@ abstract contract Fixture is Test {
     uint256 internal constant START_BALANCE = 1_000_000e6;
 
     /// @dev Expected underwriting for a tier-50 identity on the top asset rung and a clean record.
-    /// tier 50*300/99 = 151, subTier 0, tenure 50  -> identity 201
-    /// assets (>= 100_000 aUSDC)                   -> 250
-    /// history                                     -> 0
-    uint256 internal constant SCORE_TIER50 = 451;
-    uint256 internal constant LINE_TIER50 = 8_825e6; // 5_000e6 + 45_000e6 * 51 / 600
-    uint256 internal constant COLLAT_BPS_TIER50 = 7320; // 8000 - 8000 * 51 / 600
-    uint256 internal constant APR_BPS_TIER50 = 2330; // 2500 - 2000 * 51 / 600
+    /// tier band [45,60) = 190, subTier 0, tenure 50  -> identity 240
+    /// assets (>= 100_000 aUSDC)                      -> 250
+    /// history                                        -> 0
+    /// The curve spans MIN_SCORE 350 to MAX_SCORE 1000, so `above` is 140 of a 650-point span.
+    uint256 internal constant IDENTITY_TIER50 = 240;
+    uint256 internal constant SCORE_TIER50 = 490;
+    uint256 internal constant LINE_TIER50 = 14_692_307_692; // 5_000e6 + 45_000e6 * 140 / 650
+    uint256 internal constant COLLAT_BPS_TIER50 = 6277; // 8000 - 8000 * 140 / 650
+    uint256 internal constant APR_BPS_TIER50 = 2070; // 2500 - 2000 * 140 / 650
 
-    /// @dev tier 99 + subTier 99 + full tenure caps identity at 400; + 250 assets -> 650.
+    /// @dev tier band [90,100) = 300, + subTier 50 + tenure 50, capped at IDENTITY_MAX 400.
+    uint256 internal constant IDENTITY_VIP = 400;
     uint256 internal constant SCORE_VIP = 650;
-    uint256 internal constant LINE_VIP = 23_750e6; // 5_000e6 + 45_000e6 * 250 / 600
+    uint256 internal constant LINE_VIP = 25_769_230_769; // 5_000e6 + 45_000e6 * 300 / 650
 
     /// @dev Shares carry `_decimalsOffset() == 6` more decimals than the asset.
     uint256 internal constant SHARE_UNIT = 1e6;

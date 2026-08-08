@@ -112,9 +112,9 @@ Monad testnet (chain id 10143) — [see why testnet](#honest-limits).
 
 | Contract | Address |
 |---|---|
-| `CreditManager` | [`0x324719787E22a7c2c3E77bc84484317c2D2D1093`](https://testnet.monadexplorer.com/address/0x324719787E22a7c2c3E77bc84484317c2D2D1093) |
-| `StandingPool` | [`0x5ae228215dae30EC07D0196B13179CFA00146D03`](https://testnet.monadexplorer.com/address/0x5ae228215dae30EC07D0196B13179CFA00146D03) |
-| `StandingRegistry` | [`0xE066669d09afd30444429003987b9E7BcA970F19`](https://testnet.monadexplorer.com/address/0xE066669d09afd30444429003987b9E7BcA970F19) |
+| `CreditManager` | [`0x77502D2AfBE8c2Bb3e9cD7ae9f0468e6D25997cb`](https://testnet.monadexplorer.com/address/0x77502D2AfBE8c2Bb3e9cD7ae9f0468e6D25997cb) |
+| `StandingPool` | [`0x382B067B3917f07880795396b6684e30B9d30907`](https://testnet.monadexplorer.com/address/0x382B067B3917f07880795396b6684e30B9d30907) |
+| `StandingRegistry` | [`0x05d68e4B5d79994096AeB62A04333C7491D63eD0`](https://testnet.monadexplorer.com/address/0x05d68e4B5d79994096AeB62A04333C7491D63eD0) |
 
 Cleanverse contracts these bind to, unchanged and not ours:
 

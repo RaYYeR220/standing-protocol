@@ -33,8 +33,9 @@ contract StandingInvariantsTest is Fixture {
         );
     }
 
-    /// @notice Per-identity exposure adds up to the pool's book. If these ever diverge, either an
-    ///         identity is holding money the pool does not know about, or the reverse.
+    /// @notice Per-identity exposure adds up to the pool's book. Summed over every KYC hash the
+    ///         handler has ever put into circulation, including superseded ones — a re-issue must not
+    ///         be able to strand exposure under a hash nobody looks at again.
     function invariant_DrawnByIdentitySumsToOutstandingPrincipal() public view {
         uint256 sum;
         uint256 n = handler.identitiesLength();
@@ -42,6 +43,25 @@ contract StandingInvariantsTest is Fixture {
             sum += manager.drawnByIdentity(handler.identities(i));
         }
         assertEq(sum, pool.outstandingPrincipal(), "identity exposure vs pool book");
+    }
+
+    /// @notice Identity resolution always terminates on a fixed point, however the fuzzer has
+    ///         re-issued credentials.
+    function invariant_IdentityResolutionIsAFixedPoint() public view {
+        uint256 n = handler.identitiesLength();
+        for (uint256 i = 0; i < n; i++) {
+            bytes32 root = registry.canonicalIdentity(handler.identities(i));
+            assertEq(registry.canonicalIdentity(root), root, "canonical form is stable");
+        }
+    }
+
+    /// @notice Every loan the protocol wrote is at or above the minimum principal.
+    function invariant_NoLoanIsBelowTheMinimumPrincipal() public view {
+        uint256 n = manager.loanCount();
+        uint256 min = manager.MIN_LOAN_PRINCIPAL();
+        for (uint256 id = 1; id <= n; id++) {
+            assertGe(manager.loan(id).principal, min, "sub-minimum loan written");
+        }
     }
 
     /// @notice No loan is ever Active with nothing owed, and the active book reconciles to the pool.
@@ -98,6 +118,7 @@ contract StandingInvariantsTest is Fixture {
         console.log("opens       ", handler.ghostOpens());
         console.log("repayments  ", handler.ghostRepays());
         console.log("write-offs  ", handler.ghostDefaults());
+        console.log("re-issues   ", handler.ghostReissues());
         console.log("loans       ", manager.loanCount());
     }
 }

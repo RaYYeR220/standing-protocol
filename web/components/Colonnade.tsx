@@ -58,7 +58,7 @@ export function Colonnade({
           const belowFloor = i < floorIndex;
 
           const fill = !lit
-            ? "var(--color-panel-lift)"
+            ? "var(--color-panel-unlit)"
             : clears
               ? capstone
                 ? "var(--color-teal)"
@@ -74,9 +74,9 @@ export function Colonnade({
                 style={{
                   height: `${h}%`,
                   background: fill,
-                  outline: lit ? "none" : `1px solid var(--color-line)`,
+                  outline: lit ? "none" : `1px solid var(--color-line-lift)`,
                   outlineOffset: "-1px",
-                  opacity: lit ? 1 : belowFloor ? 0.9 : 0.55,
+                  opacity: lit ? 1 : belowFloor ? 1 : 0.7,
                   transform: seated ? "scaleY(1)" : "scaleY(0)",
                   transformOrigin: "bottom",
                   transition: `transform 460ms cubic-bezier(0.2,0,0.1,1) ${i * 18}ms, background-color 260ms linear, height 380ms cubic-bezier(0.2,0,0.1,1)`,

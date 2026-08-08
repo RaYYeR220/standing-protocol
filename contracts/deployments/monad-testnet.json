@@ -3,11 +3,11 @@
   "chainId": 10143,
   "rpc": "https://testnet-rpc.monad.xyz",
   "explorer": "https://testnet.monadexplorer.com",
-  "deployedAt": "2026-08-08T08:35:00Z",
+  "deployedAt": "2026-08-08T09:05:00Z",
   "protocol": {
-    "StandingRegistry": "0xE066669d09afd30444429003987b9E7BcA970F19",
-    "StandingPool": "0x5ae228215dae30EC07D0196B13179CFA00146D03",
-    "CreditManager": "0x324719787E22a7c2c3E77bc84484317c2D2D1093"
+    "StandingRegistry": "0x05d68e4B5d79994096AeB62A04333C7491D63eD0",
+    "StandingPool": "0x382B067B3917f07880795396b6684e30B9d30907",
+    "CreditManager": "0x77502D2AfBE8c2Bb3e9cD7ae9f0468e6D25997cb"
   },
   "cleanverse": {
     "apassRegistry": "0xbA82D189540CaC9DC6FF46B6837CaC1BFdEC58B9",

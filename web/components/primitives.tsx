@@ -42,8 +42,8 @@ export function Panel({
     <section className={`panel ${edge} ${className}`}>
       <header className="panel-head">
         <div className="flex min-w-0 items-baseline gap-2.5">
-          <h2 className="lbl !text-[var(--color-bone-dim)]">{label}</h2>
-          {sub ? <span className="lbl-micro truncate">{sub}</span> : null}
+          <h2 className="lbl shrink-0 whitespace-nowrap !text-[var(--color-bone-dim)]">{label}</h2>
+          {sub ? <span className="lbl-micro min-w-0 truncate">{sub}</span> : null}
         </div>
         {right ? <div className="flex shrink-0 items-center gap-2">{right}</div> : null}
       </header>
@@ -66,9 +66,11 @@ export function Row({
 }) {
   return (
     <div className={`rowline ${dense ? "!py-1" : ""}`}>
-      <div className="flex min-w-0 shrink-0 flex-col gap-0.5">
+      <div className="flex min-w-0 shrink basis-auto flex-col gap-1">
         <span className="lbl">{label}</span>
-        {note ? <span className="lbl-micro !tracking-[0.1em] normal-case">{note}</span> : null}
+        {note ? (
+          <span className="lbl-micro !leading-[1.4] !tracking-[0.08em] normal-case">{note}</span>
+        ) : null}
       </div>
       <span className="leader" />
       <div className="shrink-0 text-right">{children}</div>

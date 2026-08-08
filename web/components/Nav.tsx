@@ -57,7 +57,7 @@ export function Nav() {
                   <span className="whitespace-nowrap text-[0.8125rem] font-medium tracking-[-0.01em]">
                     {tab.label}
                   </span>
-                  <span className="lbl-micro hidden !text-[var(--color-bone-ghost)] lg:inline">
+                  <span className="lbl-micro hidden !text-[var(--color-bone-ghost)] xl:inline">
                     {tab.note}
                   </span>
                   <span

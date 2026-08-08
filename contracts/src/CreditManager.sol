@@ -116,6 +116,9 @@ contract CreditManager is ComplianceGate, AccessControl, ReentrancyGuard {
     event DefaultReportOpened(
         uint256 indexed loanId, bytes32 indexed kycHash, address indexed borrower, uint256 amountOwed
     );
+    /// @notice Emitted when a re-issued credential's outstanding principal is folded into the
+    ///         identity it belongs to.
+    event ExposureMigrated(bytes32 indexed from, bytes32 indexed into, uint256 amount);
 
     error BelowMinimumStanding(uint256 score, uint256 required);
     error ExceedsCreditLine(uint256 requested, uint256 available);
@@ -145,6 +148,51 @@ contract CreditManager is ComplianceGate, AccessControl, ReentrancyGuard {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
     }
 
+    // ---------------------------------------------------------------- identity
+
+    /// @notice Resolves the identity a credential belongs to, whether or not the link has been
+    ///         written yet.
+    /// @dev Cleanverse re-issues a credential under a fresh KYC hash when a holder re-verifies, and
+    ///      the new record names the hash it replaced. Reading has to account for that even before
+    ///      anything is recorded — otherwise a borrower who re-verifies looks like a stranger for
+    ///      exactly as long as it takes them to draw again, which is the whole window a defaulter
+    ///      would need.
+    function resolveIdentity(ApassReader.Credential memory c) public view returns (bytes32) {
+        bytes32 identity = registry.canonicalIdentity(c.kycHash);
+        if (identity == c.kycHash && c.previousKycHash != bytes32(0)) {
+            bytes32 prior = registry.canonicalIdentity(c.previousKycHash);
+            if (prior != c.kycHash) return prior;
+        }
+        return identity;
+    }
+
+    /// @notice Records the link between a re-issued credential and the one it replaced.
+    /// @dev Permissionless and idempotent. It is separate from {open} on purpose: a draw that
+    ///      reverts takes its state changes with it, so a link written only inside origination
+    ///      would be lost precisely when a refused borrower re-verifies and tries again. Anyone can
+    ///      commit the link for anyone — there is nothing to gain by doing it and something to lose
+    ///      by it going unrecorded.
+    function syncIdentity(address wallet) public {
+        ApassReader.Credential memory c = credentialOf(wallet);
+        if (!c.exists || c.kycHash == bytes32(0) || c.previousKycHash == bytes32(0)) return;
+        if (registry.supersedes(c.kycHash) != bytes32(0)) return;
+
+        bytes32 target = registry.canonicalIdentity(c.previousKycHash);
+        if (target == c.kycHash) return;
+
+        registry.linkIdentity(c.previousKycHash, c.kycHash);
+
+        // Exposure lives here, not in the registry, so it has to be re-parented too. Otherwise a
+        // borrower who re-verifies mid-loan leaves the drawn principal stranded under a key nothing
+        // reads again, and walks away with a second full credit line.
+        uint256 stranded = drawnByIdentity[c.kycHash];
+        if (stranded > 0) {
+            drawnByIdentity[c.kycHash] = 0;
+            drawnByIdentity[target] += stranded;
+            emit ExposureMigrated(c.kycHash, target, stranded);
+        }
+    }
+
     // ---------------------------------------------------------------- underwriting (view)
 
     /// @notice The full underwriting decision for a borrower, without touching state.
@@ -160,11 +208,7 @@ contract CreditManager is ComplianceGate, AccessControl, ReentrancyGuard {
         q.refusal = reason;
 
         ApassReader.Credential memory c = credentialOf(borrower);
-        bytes32 identity = registry.canonicalIdentity(
-            c.previousKycHash != bytes32(0) && registry.supersedes(c.kycHash) == bytes32(0)
-                ? c.previousKycHash
-                : c.kycHash
-        );
+        bytes32 identity = resolveIdentity(c);
         StandingRegistry.History memory h = registry.historyOf(identity);
         uint256 balance = IERC20(verifiedAsset).balanceOf(borrower);
 
@@ -209,10 +253,8 @@ contract CreditManager is ComplianceGate, AccessControl, ReentrancyGuard {
 
         // A re-issued credential carries the hash it replaced. Stitching them together here — before
         // anything is read — is what stops a borrower shedding a default by re-verifying.
-        if (c.previousKycHash != bytes32(0)) {
-            registry.linkIdentity(c.previousKycHash, c.kycHash);
-        }
-        bytes32 identity = registry.canonicalIdentity(c.kycHash);
+        syncIdentity(msg.sender);
+        bytes32 identity = resolveIdentity(c);
 
         StandingRegistry.History memory h = registry.historyOf(identity);
         uint256 balance = IERC20(verifiedAsset).balanceOf(msg.sender);

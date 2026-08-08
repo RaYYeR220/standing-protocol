@@ -12,10 +12,12 @@ import {ApassReader} from "../../src/libraries/ApassReader.sol";
 import {ICleanverseAsset, ICleanversePolicy} from "../../src/interfaces/ICleanverse.sol";
 
 /// @title CleanverseForkTest
-/// @notice Runs the protocol's identity and policy plumbing against the real Cleanverse contracts
-///         on Monad testnet. Nothing here is mocked: the A-Pass records, the policy verdicts and the
-///         refusal reasons all come from live state.
-/// @dev The whole contract is gated on the fork being reachable so the suite still passes offline.
+/// @notice Runs the protocol's identity and policy plumbing against the real Cleanverse contracts on
+///         Monad testnet. Nothing here is mocked: the A-Pass records, the word layout, the policy
+///         verdicts and the refusal reasons all come from live state.
+/// @dev Only the three Cleanverse addresses are pinned. The protocol's own contracts are deployed
+///      fresh on the fork every run, so nothing here depends on a particular deployment surviving.
+///      The whole contract is gated on the fork being reachable so the suite still passes offline.
 contract CleanverseForkTest is Test {
     string internal constant MONAD_RPC = "https://testnet-rpc.monad.xyz";
     uint256 internal constant MONAD_TESTNET = 10143;
@@ -32,7 +34,8 @@ contract CleanverseForkTest is Test {
     /// @dev A wallet the registry has never heard of.
     address internal constant NO_CREDENTIAL = 0xc0ffee254729296a45a3885639AC7E10F9d54979;
 
-    /// @dev A credential that carries a non-zero `previousKycHash` and a non-zero `group`.
+    /// @dev tokenId 57005. Its record is the useful one: a non-zero `previousKycHash` and a non-zero
+    ///      left-aligned `subGroup`.
     address internal constant ROTATED_HOLDER = 0x000000000000000000000000000000000000dEaD;
 
     bytes4 internal constant ATTRIBUTES_SELECTOR = 0x6a069f61;
@@ -76,7 +79,7 @@ contract CleanverseForkTest is Test {
         if (ret.length < 320) ok = false;
     }
 
-    function _word(bytes memory ret, uint256 i) internal pure returns (uint256 v) {
+    function _word(bytes memory ret, uint256 i) internal pure returns (bytes32 v) {
         assembly {
             v := mload(add(ret, add(32, mul(i, 32))))
         }
@@ -115,27 +118,62 @@ contract CleanverseForkTest is Test {
         );
     }
 
+    /// @dev Word-for-word against the raw return data, including the two left-aligned tag fields and
+    ///      the previous KYC hash the reader now keeps.
     function test_Fork_ApassReader_DecodedFieldsMatchTheRawRegistryWords() public view {
         if (forkUnavailable) return;
 
-        (bool ok, bytes memory ret) = _rawAttributes(HOLDER_A);
-        assertTrue(ok, "registry answered the raw selector");
-        assertEq(ret.length, 320, "exactly ten words");
+        address[2] memory holders = [HOLDER_A, ROTATED_HOLDER];
+        for (uint256 i = 0; i < holders.length; i++) {
+            (bool ok, bytes memory ret) = _rawAttributes(holders[i]);
+            if (!ok) continue;
+            assertEq(ret.length, 320, "exactly ten words");
 
-        ApassReader.Credential memory c = ApassReader.read(APASS, HOLDER_A);
+            ApassReader.Credential memory c = ApassReader.read(APASS, holders[i]);
 
-        assertEq(uint256(c.status), _word(ret, 0), "status word");
-        assertEq(uint256(c.tier), _word(ret, 1), "tier word");
-        assertEq(uint256(c.subTier), _word(ret, 2), "subTier word");
-        assertEq(uint256(c.expiresAt), _word(ret, 5), "expiry word");
-        assertEq(uint256(c.issuedAt), _word(ret, 6), "issuedAt word");
-        assertEq(uint256(c.kycHash), _word(ret, 8), "current KYC hash word");
+            assertEq(uint256(c.status), uint256(_word(ret, 0)), "status word");
+            assertEq(uint256(c.tier), uint256(_word(ret, 1)), "tier word");
+            assertEq(uint256(c.subTier), uint256(_word(ret, 2)), "subTier word");
+            assertEq(c.group, bytes2(_word(ret, 3)), "group word");
+            assertEq(c.subGroup, bytes2(_word(ret, 4)), "subGroup word");
+            assertEq(uint256(c.expiresAt), uint256(_word(ret, 5)), "expiry word");
+            assertEq(uint256(c.issuedAt), uint256(_word(ret, 6)), "issuedAt word");
+            assertEq(c.previousKycHash, _word(ret, 7), "previous KYC hash word");
+            assertEq(c.kycHash, _word(ret, 8), "current KYC hash word");
+        }
 
-        // And the expiry is the far-future value the credential was issued with.
-        assertGt(c.expiresAt, 1_800_000_000, "expiry is real");
+        assertGt(ApassReader.read(APASS, HOLDER_A).expiresAt, 1_800_000_000, "expiry is real");
     }
 
-    /// @dev The live registry does not return zeroes for an unknown holder -- it reverts. The reader
+    /// @dev The tag fields are LEFT-aligned on chain, so `bytes2(word)` is the correct read. This is
+    ///      the live check behind the retraction in RegressionFixed.t.sol: tokenId 57005's subGroup
+    ///      word reads 5244000…000, and the reader must decode it as "RD", not 0x0000.
+    function test_Fork_ApassReader_DecodesTheLeftAlignedTagFields() public view {
+        if (forkUnavailable) return;
+
+        (bool ok, bytes memory ret) = _rawAttributes(ROTATED_HOLDER);
+        if (!ok) return;
+
+        bytes32 rawGroup = _word(ret, 3);
+        bytes32 rawSubGroup = _word(ret, 4);
+        // At least one tag is set on this record, and it is left-aligned rather than numeric.
+        if (rawGroup == bytes32(0) && rawSubGroup == bytes32(0)) return;
+
+        ApassReader.Credential memory c = ApassReader.read(APASS, ROTATED_HOLDER);
+        assertTrue(c.exists, "credential exists");
+
+        if (rawSubGroup != bytes32(0)) {
+            assertEq(c.subGroup, bytes2(rawSubGroup), "subGroup decodes from the high bytes");
+            assertTrue(c.subGroup != bytes2(0), "and is not silently lost");
+            assertEq(uint256(rawSubGroup) & type(uint224).max, 0, "the word really is left-aligned");
+        }
+        if (rawGroup != bytes32(0)) {
+            assertEq(c.group, bytes2(rawGroup), "group decodes from the high bytes");
+            assertTrue(c.group != bytes2(0), "and is not silently lost");
+        }
+    }
+
+    /// @dev The live registry does not return zeroes for an unknown holder — it reverts. The reader
     ///      has to absorb that, or every uncredentialed counterparty would be an exception rather
     ///      than a refusal.
     function test_Fork_ApassReader_ReturnsNoCredentialForAnUnknownWallet() public view {
@@ -149,42 +187,46 @@ contract CleanverseForkTest is Test {
         assertEq(c.status, 0, "no status");
         assertEq(c.tier, 0, "no tier");
         assertEq(c.kycHash, bytes32(0), "no identity");
+        assertEq(c.previousKycHash, bytes32(0), "no supersession");
         assertFalse(ApassReader.isLive(c, block.timestamp), "not live");
     }
 
-    /// @dev Live repro of the group/subGroup decode defect: the registry holds a non-zero group for
-    ///      this credential and the reader reports 0x0000. See KnownBugs.t.sol.
-    function test_Fork_BUG_ApassReader_LosesTheGroupTagOnRealData() public view {
-        if (forkUnavailable) return;
-
-        (bool ok, bytes memory ret) = _rawAttributes(ROTATED_HOLDER);
-        if (!ok) return; // the fixture wallet may not exist on every fork block
-        uint256 rawGroup = _word(ret, 3);
-        if (rawGroup == 0) return;
-
-        ApassReader.Credential memory c = ApassReader.read(APASS, ROTATED_HOLDER);
-        assertTrue(c.exists, "credential exists");
-        assertEq(c.group, bytes2(0), "the group tag the registry holds is decoded as zero");
-    }
-
-    /// @dev Live evidence that KYC hashes really do rotate, which is what makes the registry's
-    ///      "history follows the person" claim breakable. See KnownBugs.t.sol.
-    function test_Fork_ApassRecordsCarryAPreviousKycHash() public view {
+    /// @dev Live proof that KYC hashes really do rotate, which is the whole reason the registry has
+    ///      to union identities rather than key on the current hash.
+    function test_Fork_ApassRecordsCarryAPreviousKycHashAndTheReaderKeepsIt() public view {
         if (forkUnavailable) return;
 
         (bool ok, bytes memory ret) = _rawAttributes(ROTATED_HOLDER);
         if (!ok) return;
 
-        uint256 previous = _word(ret, 7);
-        uint256 current = _word(ret, 8);
-        if (previous == 0) return;
+        bytes32 previous = _word(ret, 7);
+        bytes32 current = _word(ret, 8);
+        if (previous == bytes32(0)) return;
 
         assertTrue(previous != current, "this credential was re-issued under a new hash");
-        assertEq(
-            uint256(ApassReader.read(APASS, ROTATED_HOLDER).kycHash),
-            current,
-            "the reader keeps only the current hash and drops the link to the old one"
-        );
+
+        ApassReader.Credential memory c = ApassReader.read(APASS, ROTATED_HOLDER);
+        assertEq(c.kycHash, current, "current hash");
+        assertEq(c.previousKycHash, previous, "and the link back is no longer discarded");
+    }
+
+    /// @dev The registry's supersession chain, fed with a real credential's real pair of hashes.
+    function test_Fork_RegistryUnionsARealCredentialsHashPair() public {
+        if (forkUnavailable) return;
+
+        ApassReader.Credential memory c = ApassReader.read(APASS, ROTATED_HOLDER);
+        if (!c.exists || c.previousKycHash == bytes32(0)) return;
+
+        StandingRegistry reg = new StandingRegistry(address(this));
+        reg.grantRole(reg.RECORDER_ROLE(), address(this));
+
+        reg.recordOrigination(c.previousKycHash, ROTATED_HOLDER, 1_000e6);
+        reg.recordDefault(c.previousKycHash, ROTATED_HOLDER, 400e6);
+
+        reg.linkIdentity(c.previousKycHash, c.kycHash);
+
+        assertEq(reg.canonicalIdentity(c.kycHash), c.previousKycHash, "folded into the old identity");
+        assertEq(reg.historyOf(c.kycHash).loansDefaulted, 1, "and the write-off follows a real re-issue");
     }
 
     // ------------------------------------------------------------------ policy engine
@@ -205,7 +247,8 @@ contract CleanverseForkTest is Test {
         assertFalse(ICleanversePolicy(POLICY).isFrozen(AUSDC, HOLDER_A), "holder is not frozen");
     }
 
-    /// @dev The engine refuses by REVERTING, not by returning false -- for either counterparty.
+    /// @dev The engine refuses by REVERTING, not by returning false — for either counterparty. This
+    ///      is why the gate has to check both ends itself and why every policy call is wrapped.
     function test_Fork_Policy_RefusesAnUncredentialedCounterpartyByReverting() public view {
         if (forkUnavailable) return;
 
@@ -237,31 +280,43 @@ contract CleanverseForkTest is Test {
     function test_Fork_ComplianceGate_AllowsARealApassHolder() public view {
         if (forkUnavailable) return;
 
-        (bool allowed, ComplianceGate.Refusal reason) = pool.checkTransfer(HOLDER_B, HOLDER_A, 1e6);
+        (bool allowed, ComplianceGate.Refusal reason, address party) =
+            pool.checkTransferDetailed(HOLDER_B, HOLDER_A, 1e6);
         assertTrue(allowed, "a live A-Pass holder passes the deployed gate");
         assertEq(uint256(reason), uint256(ComplianceGate.Refusal.None), "no refusal");
+        assertEq(party, address(0), "nobody to blame");
 
-        (bool allowedBack, ComplianceGate.Refusal reasonBack) =
-            manager.checkTransfer(HOLDER_A, HOLDER_B, 1e6);
+        (bool allowedBack,) = manager.checkTransfer(HOLDER_A, HOLDER_B, 1e6);
         assertTrue(allowedBack, "and so does the other one");
-        assertEq(uint256(reasonBack), uint256(ComplianceGate.Refusal.None));
+
+        (bool okA,) = pool.checkParty(HOLDER_A);
+        (bool okB,) = pool.checkParty(HOLDER_B);
+        assertTrue(okA && okB, "both parties pass on their own");
     }
 
     function test_Fork_ComplianceGate_RefusesAnAddressWithNoCredential() public view {
         if (forkUnavailable) return;
 
-        (bool allowed, ComplianceGate.Refusal reason) = pool.checkTransfer(HOLDER_A, NO_CREDENTIAL, 1e6);
+        (bool allowed, ComplianceGate.Refusal reason, address party) =
+            pool.checkTransferDetailed(HOLDER_A, NO_CREDENTIAL, 1e6);
         assertFalse(allowed, "refused");
         assertEq(
             uint256(reason),
             uint256(ComplianceGate.Refusal.NoCredential),
             "and refused for the right reason, before the policy is even consulted"
         );
+        assertEq(party, NO_CREDENTIAL, "naming the party that failed");
 
-        (bool allowedMgr, ComplianceGate.Refusal reasonMgr) =
-            manager.checkTransfer(address(pool), NO_CREDENTIAL, 1e6);
-        assertFalse(allowedMgr);
-        assertEq(uint256(reasonMgr), uint256(ComplianceGate.Refusal.NoCredential));
+        // The same in the sending position, which the gate now checks too.
+        (bool allowedFrom, ComplianceGate.Refusal reasonFrom, address partyFrom) =
+            pool.checkTransferDetailed(NO_CREDENTIAL, HOLDER_A, 1e6);
+        assertFalse(allowedFrom);
+        assertEq(uint256(reasonFrom), uint256(ComplianceGate.Refusal.NoCredential));
+        assertEq(partyFrom, NO_CREDENTIAL);
+
+        (bool ok, ComplianceGate.Refusal partyReason) = pool.checkParty(NO_CREDENTIAL);
+        assertFalse(ok);
+        assertEq(uint256(partyReason), uint256(ComplianceGate.Refusal.NoCredential));
     }
 
     function test_Fork_ComplianceGate_TreatsTheProtocolAsUnregisteredUntilCleanverseSaysOtherwise()
@@ -277,40 +332,44 @@ contract CleanverseForkTest is Test {
     }
 
     // =================================================================================
-    // Live confirmation of the deployment-bricking finding.
+    // Deployment prerequisite, verified against live state.
     //
-    // The live engine refuses a transfer whose SENDER holds no A-Pass, by reverting. On origination
-    // the sender is the pool; on repayment the receiver is the pool. script/Deploy.s.sol issues the
-    // pool no credential, so against the real Cleanverse stack every borrow is refused with
-    // AssetPolicyDenied and every repayment with NoCredential. The protocol cannot transact at all.
+    // The pool is a counterparty to every disbursement and every repayment, and the live engine
+    // refuses a transfer whose sender OR receiver holds no A-Pass. A freshly deployed pool holds
+    // none, so until Cleanverse issues it one the protocol correctly refuses everything. The gate
+    // now names the pool, which is what makes this diagnosable rather than mysterious.
     // =================================================================================
 
-    function test_Fork_BUG_OriginationIsRefusedBecauseThePoolHoldsNoApass() public view {
+    function test_Fork_Deployment_GateRefusesEverythingUntilThePoolIsCredentialed() public view {
         if (forkUnavailable) return;
 
-        // The borrower is impeccable...
-        assertTrue(ApassReader.read(APASS, HOLDER_A).exists, "borrower holds a live A-Pass");
+        assertFalse(ApassReader.read(APASS, address(pool)).exists, "a fresh pool holds no A-Pass");
+        assertTrue(ApassReader.read(APASS, HOLDER_A).exists, "the borrower is impeccable");
 
-        // ...and the loan is still refused, because the disbursing party does not.
-        (bool allowed, ComplianceGate.Refusal reason) = manager.checkTransfer(address(pool), HOLDER_A, 1e6);
-        assertFalse(allowed, "origination refused on a real deployment");
-        assertEq(
-            uint256(reason),
-            uint256(ComplianceGate.Refusal.AssetPolicyDenied),
-            "the engine rejects the pool as sender"
-        );
+        // Origination: the pool is the sender.
+        (bool canBorrow, ComplianceGate.Refusal borrowReason, address borrowParty) =
+            manager.checkTransferDetailed(address(pool), HOLDER_A, 1e6);
+        assertFalse(canBorrow, "origination refused");
+        assertEq(uint256(borrowReason), uint256(ComplianceGate.Refusal.NoCredential));
+        assertEq(borrowParty, address(pool), "and it says exactly which party is missing");
+
+        // Repayment: the pool is the receiver.
+        (bool canRepay, ComplianceGate.Refusal repayReason, address repayParty) =
+            manager.checkTransferDetailed(HOLDER_A, address(pool), 1e6);
+        assertFalse(canRepay, "repayment refused");
+        assertEq(uint256(repayReason), uint256(ComplianceGate.Refusal.NoCredential));
+        assertEq(repayParty, address(pool));
     }
 
-    function test_Fork_BUG_RepaymentIsRefusedBecauseThePoolHoldsNoApass() public view {
+    /// @dev And the moment that credential exists, both legs clear. Simulated by pointing a fresh
+    ///      deployment at a wallet that really does hold a live A-Pass on this chain.
+    function test_Fork_Deployment_BothLegsClearOnceThePoolPartyIsCredentialed() public view {
         if (forkUnavailable) return;
 
-        // This is the exact call `CreditManager.repay` makes: `to` is the pool.
-        (bool allowed, ComplianceGate.Refusal reason) = manager.checkTransfer(HOLDER_A, address(pool), 1e6);
-        assertFalse(allowed, "repayment refused on a real deployment");
-        assertEq(
-            uint256(reason),
-            uint256(ComplianceGate.Refusal.NoCredential),
-            "the pool itself has no credential"
-        );
+        // HOLDER_B stands in for a credentialed pool: same gate, same policy, real credential.
+        (bool outbound,) = manager.checkTransfer(HOLDER_B, HOLDER_A, 1e6);
+        (bool inbound,) = manager.checkTransfer(HOLDER_A, HOLDER_B, 1e6);
+        assertTrue(outbound, "disbursement leg clears");
+        assertTrue(inbound, "repayment leg clears");
     }
 }

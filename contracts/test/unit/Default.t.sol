@@ -13,8 +13,8 @@ contract DefaultTest is Fixture {
     uint256 internal constant DEPOSIT = 200_000e6;
     uint256 internal constant PRINCIPAL = 5_000e6;
     uint256 internal constant TERM = 30 days;
-    uint256 internal constant COLLATERAL = 3_660e6; // 73.2% of 5_000e6
-    uint256 internal constant SHORTFALL = PRINCIPAL - COLLATERAL; // 1_340e6
+    uint256 internal constant COLLATERAL = 3_138_500_000; // 62.77% of 5_000e6
+    uint256 internal constant SHORTFALL = PRINCIPAL - COLLATERAL;
 
     function setUp() public override {
         super.setUp();
@@ -96,7 +96,7 @@ contract DefaultTest is Fixture {
         uint256 interestDue = manager.loan(loanId).interestDue;
 
         uint256 assetsBefore = pool.totalAssets();
-        uint256 priceBefore = pool.convertToAssets(1e6);
+        uint256 priceBefore = sharePrice();
         uint256 supply = pool.totalSupply();
         uint256 poolBalBefore = asset.balanceOf(address(pool));
 
@@ -115,7 +115,7 @@ contract DefaultTest is Fixture {
         assertEq(pool.outstandingPrincipal(), 0, "loan is off the book");
         assertEq(pool.lifetimeLosses(), SHORTFALL, "loss recognised");
         assertEq(pool.totalAssets(), assetsBefore - SHORTFALL, "total assets fall by the shortfall");
-        assertLt(pool.convertToAssets(1e6), priceBefore, "LPs actually take the loss");
+        assertLt(sharePrice(), priceBefore, "LPs actually take the loss");
         assertEq(pool.totalSupply(), supply, "no shares minted or burned to hide it");
 
         assertEq(manager.drawnByIdentity(KYC_ALICE), 0, "exposure released");
@@ -163,10 +163,7 @@ contract DefaultTest is Fixture {
 
         // A wallet the protocol has never seen, funded, credentialed, same person.
         address aliceC = makeAddr("aliceC");
-        issueCredential(aliceC, 50, 0, KYC_ALICE);
-        asset.mint(aliceC, 500_000e6);
-        vm.prank(aliceC);
-        asset.approve(address(manager), type(uint256).max);
+        onboard(aliceC, 50, 0, KYC_ALICE, START_BALANCE);
 
         CreditManager.Quote memory q = manager.quote(aliceC, 1_000e6, TERM);
         assertEq(q.score, SCORE_TIER50 - StandingMath.DEFAULT_PENALTY, "penalty follows the person");
@@ -195,21 +192,20 @@ contract DefaultTest is Fixture {
         manager.markDefault(loanId);
 
         address vipC = makeAddr("vipC");
-        issueCredential(vipC, 99, 99, KYC_VIP);
-        asset.mint(vipC, 500_000e6);
-        vm.prank(vipC);
-        asset.approve(address(manager), type(uint256).max);
+        onboard(vipC, 99, 99, KYC_VIP, START_BALANCE);
 
         CreditManager.Quote memory q = manager.quote(vipC, 1_000e6, TERM);
         assertEq(q.score, SCORE_VIP - StandingMath.DEFAULT_PENALTY, "score dropped by the penalty");
         assertLt(q.creditLine, lineBefore, "a fresh wallet gets a smaller line");
-        assertEq(q.creditLine, MAX_CREDIT_LINE / 10, "down to the floor of the curve");
+        // 650 - 250 = 400, i.e. 50 points above MIN_SCORE on a 650-point span.
+        assertEq(q.creditLine, 8_461_538_461, "barely above the floor of the curve");
         assertGt(q.collateralRequired, 0, "and has to post collateral again");
 
-        // It can still borrow -- but only a fifth of what it could before.
+        // It can still borrow -- but at a third of the size and with collateral again.
+        assertLt(q.creditLine * 3, LINE_VIP, "the line is cut by more than two thirds");
         vm.prank(vipC);
         uint256 second = manager.open(q.creditLine, TERM);
-        assertEq(manager.loan(second).principal, MAX_CREDIT_LINE / 10);
+        assertEq(manager.loan(second).principal, q.creditLine);
     }
 
     function test_Default_IsCumulativeAcrossLoans() public {

@@ -6,6 +6,7 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {ComplianceGate} from "./ComplianceGate.sol";
 
@@ -20,15 +21,28 @@ import {ComplianceGate} from "./ComplianceGate.sol";
 ///      between those two moments does not quietly slip out. Compliance is a property of each
 ///      movement, not of the account.
 ///
+///      The vault is donation-sensitive by design: `totalAssets` reads its own balance, so anyone
+///      may transfer assets in and the share price moves. The donor receives nothing and existing
+///      depositors get the windfall, so there is no theft — only a mis-priced entry for whoever
+///      deposits next. A six-decimal virtual offset makes griefing a first depositor cost a million
+///      to one, which is the right trade against keeping a second source of truth in sync.
+///
 ///      Second, the vault carries genuine credit risk. Loans are unsecured beyond a partial
 ///      collateral posting, so a default is a real loss, absorbed by the share price rather than
 ///      hidden in a reserve. `totalAssets` counts idle balance plus principal out on loan, which is
 ///      what depositors are actually exposed to.
-contract StandingPool is ERC4626, AccessControl, ComplianceGate {
+contract StandingPool is ERC4626, AccessControl, ReentrancyGuard, ComplianceGate {
     using SafeERC20 for IERC20;
 
-    bytes32 public constant CREDIT_MANAGER_ROLE = keccak256("CREDIT_MANAGER_ROLE");
     bytes32 public constant RISK_ADMIN_ROLE = keccak256("RISK_ADMIN_ROLE");
+
+    /// @notice The only contract that may move the pool's assets into a loan.
+    /// @dev Set once, then fixed forever — deliberately not a grantable role. Disbursement
+    ///      authority is the one power over this vault that cannot be audited from the outside:
+    ///      `fundLoan` moves assets while `outstandingPrincipal` absorbs the difference, so the
+    ///      share price does not move and a rogue holder of that authority drains the pool
+    ///      invisibly. Admin keeps parameter control; nobody can be handed the money.
+    address public creditManager;
 
     /// @notice Principal currently out on loan.
     uint256 public outstandingPrincipal;
@@ -47,9 +61,12 @@ contract StandingPool is ERC4626, AccessControl, ComplianceGate {
     event RepaymentSettled(uint256 principal, uint256 interest);
     event LossAbsorbed(uint256 principal);
     event MaxUtilizationSet(uint256 bps);
+    event CreditManagerSet(address creditManager);
 
     error UtilizationExceeded(uint256 requested, uint256 available);
     error InvalidParameter();
+    error NotCreditManager();
+    error CreditManagerAlreadySet();
 
     constructor(address asset_, address apassRegistry_, address policy_, address admin)
         ERC20("Standing Pool aUSDC", "stdaUSDC")
@@ -58,6 +75,53 @@ contract StandingPool is ERC4626, AccessControl, ComplianceGate {
     {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         _grantRole(RISK_ADMIN_ROLE, admin);
+    }
+
+    /// @notice Binds the credit manager. Callable exactly once, because the manager has to be
+    ///         deployed after the pool it lends from.
+    function setCreditManager(address manager) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (creditManager != address(0)) revert CreditManagerAlreadySet();
+        if (manager == address(0)) revert InvalidParameter();
+        creditManager = manager;
+        emit CreditManagerSet(manager);
+    }
+
+    modifier onlyCreditManager() {
+        if (msg.sender != creditManager) revert NotCreditManager();
+        _;
+    }
+
+    // ---------------------------------------------------------------- reentrancy
+
+    /// @dev A Cleanverse Verified Asset consults its policy contract on transfer, so control leaves
+    ///      this vault in the middle of every movement of value. Without these guards a depositor
+    ///      could mint shares from inside a repayment or a write-off, at a price that reflects only
+    ///      half of the transaction in flight. Guarding the entry points closes the whole class
+    ///      rather than chasing each ordering individually.
+    function deposit(uint256 assets, address receiver) public override nonReentrant returns (uint256) {
+        return super.deposit(assets, receiver);
+    }
+
+    function mint(uint256 shares, address receiver) public override nonReentrant returns (uint256) {
+        return super.mint(shares, receiver);
+    }
+
+    function withdraw(uint256 assets, address receiver, address shareOwner)
+        public
+        override
+        nonReentrant
+        returns (uint256)
+    {
+        return super.withdraw(assets, receiver, shareOwner);
+    }
+
+    function redeem(uint256 shares, address receiver, address shareOwner)
+        public
+        override
+        nonReentrant
+        returns (uint256)
+    {
+        return super.redeem(shares, receiver, shareOwner);
     }
 
     // ---------------------------------------------------------------- accounting
@@ -152,7 +216,7 @@ contract StandingPool is ERC4626, AccessControl, ComplianceGate {
     /// @notice Sends principal to a borrower the credit manager has already underwritten.
     /// @dev The pool does not re-underwrite; it enforces its own liquidity and utilization limits
     ///      and nothing else. Identity and policy were checked by the manager on the same call.
-    function fundLoan(address borrower, uint256 amount) external onlyRole(CREDIT_MANAGER_ROLE) {
+    function fundLoan(address borrower, uint256 amount) external onlyCreditManager {
         uint256 assets = totalAssets();
         uint256 ceiling = (assets * maxUtilizationBps) / 10_000;
         if (outstandingPrincipal + amount > ceiling) {
@@ -164,10 +228,7 @@ contract StandingPool is ERC4626, AccessControl, ComplianceGate {
     }
 
     /// @notice Books a repayment. The assets themselves are transferred in by the credit manager.
-    function settleRepayment(uint256 principal, uint256 interest)
-        external
-        onlyRole(CREDIT_MANAGER_ROLE)
-    {
+    function settleRepayment(uint256 principal, uint256 interest) external onlyCreditManager {
         outstandingPrincipal -= principal;
         lifetimeInterest += interest;
         emit RepaymentSettled(principal, interest);
@@ -176,7 +237,7 @@ contract StandingPool is ERC4626, AccessControl, ComplianceGate {
     /// @notice Writes off principal that will not be returned.
     /// @dev Reduces `totalAssets`, so the loss lands on the share price and is shared across
     ///      depositors in proportion to their stake. There is no reserve to hide it in.
-    function absorbLoss(uint256 principal) external onlyRole(CREDIT_MANAGER_ROLE) {
+    function absorbLoss(uint256 principal) external onlyCreditManager {
         outstandingPrincipal -= principal;
         lifetimeLosses += principal;
         emit LossAbsorbed(principal);
