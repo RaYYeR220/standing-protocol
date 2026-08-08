@@ -63,7 +63,7 @@ contract CleanverseForkTest is Test {
                 50_000e6,
                 365 days
             );
-            pool.grantRole(pool.CREDIT_MANAGER_ROLE(), address(manager));
+            pool.setCreditManager(address(manager));
             registry.grantRole(registry.RECORDER_ROLE(), address(manager));
         } catch {
             forkUnavailable = true;

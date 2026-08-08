@@ -95,7 +95,7 @@ abstract contract Fixture is Test {
         );
 
         vm.startPrank(admin);
-        pool.grantRole(pool.CREDIT_MANAGER_ROLE(), address(manager));
+        pool.setCreditManager(address(manager));
         registry.grantRole(registry.RECORDER_ROLE(), address(manager));
         // As in script/Deploy.s.sol: after this the recorder set can never change again.
         registry.renounceRole(registry.DEFAULT_ADMIN_ROLE(), admin);

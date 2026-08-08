@@ -194,15 +194,24 @@ contract CapsTest is Fixture {
         pool.setMaxUtilizationBps(5000);
     }
 
-    function test_FundLoan_IsRoleGated() public {
-        bytes32 role = pool.CREDIT_MANAGER_ROLE();
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                IAccessControl.AccessControlUnauthorizedAccount.selector, stranger, role
-            )
-        );
+    function test_FundLoan_IsBoundToTheCreditManager() public {
+        assertEq(pool.creditManager(), address(manager), "bound at deployment");
+
+        vm.expectRevert(StandingPool.NotCreditManager.selector);
         vm.prank(stranger);
         pool.fundLoan(stranger, 1_000e6);
+
+        vm.expectRevert(StandingPool.NotCreditManager.selector);
+        vm.prank(admin);
+        pool.fundLoan(admin, 1_000e6);
+
+        vm.expectRevert(StandingPool.NotCreditManager.selector);
+        vm.prank(stranger);
+        pool.settleRepayment(1, 0);
+
+        vm.expectRevert(StandingPool.NotCreditManager.selector);
+        vm.prank(stranger);
+        pool.absorbLoss(1);
     }
 
     function test_RegistryWrites_AreRoleGated() public {

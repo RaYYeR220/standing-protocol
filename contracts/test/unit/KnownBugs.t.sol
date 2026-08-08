@@ -182,33 +182,6 @@ contract KnownBugsTest is Fixture {
     }
 
     // =================================================================================
-    // BUG B (high, acknowledged) -- a rogue CREDIT_MANAGER_ROLE drains the pool, and the theft does
-    // not move the share price because `outstandingPrincipal` absorbs it. The role is granted only to
-    // the manager at deployment, but pool admin is retained and can grant it again at any time.
-    // =================================================================================
-
-    function test_BUG_Pool_RogueCreditManagerDrainsWithoutMovingTheSharePrice() public {
-        assertTrue(pool.hasRole(pool.DEFAULT_ADMIN_ROLE(), admin), "pool admin is retained");
-
-        uint256 assetsBefore = pool.totalAssets();
-        uint256 priceBefore = sharePrice();
-
-        bytes32 role = pool.CREDIT_MANAGER_ROLE();
-        vm.prank(admin);
-        pool.grantRole(role, stranger);
-
-        // No credential, no policy check, no loan, no borrower.
-        vm.prank(stranger);
-        pool.fundLoan(stranger, 150_000e6);
-
-        assertEq(asset.balanceOf(stranger), START_BALANCE + 150_000e6, "money is gone");
-        assertEq(pool.totalAssets(), assetsBefore, "vault still claims the assets are there");
-        assertEq(sharePrice(), priceBefore, "share price does not flinch");
-        assertEq(pool.outstandingPrincipal(), 150_000e6, "booked as a loan that does not exist");
-        assertEq(manager.loanCount(), 0, "and no loan id maps to it, so it can never be unwound");
-    }
-
-    // =================================================================================
     // BUG C (medium, acknowledged) -- `totalAssets()` reads `balanceOf`, so a plain transfer into the
     // pool moves the share price. The virtual offset bounds the griefing but does not remove the
     // channel: value can still be pushed into a compliance-gated vault without passing the gate.

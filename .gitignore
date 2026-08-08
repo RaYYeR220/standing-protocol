@@ -16,18 +16,13 @@ web/node_modules/
 *.key
 wallets.json
 
-# internal / working artifacts — never publish
+# working notes and scratch, kept out of the repo
 _internal/
 *-internal/
-.remember/
-MEMORY.md
-BRIEF.md
 ui-prototypes/
 mockups/
 variants/
 design-ref/
-.claude/
-.playwright-mcp/
 scratchpad/
 
 # os
