@@ -118,7 +118,7 @@ The gate names the failing party and the failing condition. On either chain:
 cast call 0xC6E2aC49a18BfB71F2981efeaac2aC41Db1c1f74 \
   "checkTransferDetailed(address,address,uint256)(bool,uint8,address)" \
   0x010263d8e3b2DC38F63A3f1660D2502f204ffB6D \
-  0xAbC0000000000000000000000000000000000123 1000000 \
+  0xABc0000000000000000000000000000000000123 1000000 \
   --rpc-url https://testnet-rpc.monad.xyz
 # -> false 1 0xAbC0…0123     NoCredential, and it says whose fault it is
 ```
