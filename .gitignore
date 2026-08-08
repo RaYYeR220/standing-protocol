@@ -1,0 +1,35 @@
+# deps & build
+node_modules/
+contracts/lib/
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+web/.next/
+web/dist/
+web/node_modules/
+*.tsbuildinfo
+
+# env & secrets
+.env
+.env.*
+!.env.example
+*.key
+wallets.json
+
+# internal / working artifacts — never publish
+_internal/
+*-internal/
+.remember/
+MEMORY.md
+BRIEF.md
+ui-prototypes/
+mockups/
+variants/
+design-ref/
+.claude/
+.playwright-mcp/
+scratchpad/
+
+# os
+.DS_Store
+Thumbs.db
