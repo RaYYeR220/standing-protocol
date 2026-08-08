@@ -69,7 +69,20 @@ too.
 
 ---
 
-## 4. The rest of it
+## 4. The console
+
+**[standing-console.vercel.app](https://standing-console.vercel.app)** — reading both live
+deployments. The network switch in the header swaps chain, RPC, explorer and address set together.
+
+Start on **Base**, where the loans are:
+- [Loan book](https://standing-console.vercel.app/book?n=base) — one repaid loan, one live, 26.93% utilization
+- [Borrower](https://standing-console.vercel.app/?n=base&a=0x9E2816003da34Ea0E232Fb59A5e475Fce1121d98) — the credential, the score itemised, the terms
+- [Compliance](https://standing-console.vercel.app/compliance?n=base) — the gate resolving condition by condition; paste `0xABc0000000000000000000000000000000000123` to watch it refuse and name the party
+- [Pool](https://standing-console.vercel.app/pool?n=base) — assets, utilization, interest, losses
+
+Every number is read live from chain. Monad's pool is empty and shows zeroes, which is the truth.
+
+## 5. The rest of it
 
 ```bash
 cd contracts && forge test          # unit + invariant + forked-network
@@ -77,16 +90,12 @@ cd ../web && npm install && npm run dev    # the console, reading the live deplo
 cd ../mcp && npm install && npm run build && node dist/index.js   # MCP server
 ```
 
-The console makes the enforcement visible: the credential behind a score, every term of the
-breakdown, the compliance verdict resolving condition by condition, and the refusals in plain
-language.
-
 The MCP server exposes the same underwriting as tools — "what would this borrower get and why",
 "would this transfer be allowed and who fails it" — read-only, no keys, cannot move a cent.
 
 ---
 
-## 5. Deployed
+## 6. Deployed
 
 Monad testnet, chain id 10143:
 
@@ -107,7 +116,7 @@ cast call 0xC6E2aC49a18BfB71F2981efeaac2aC41Db1c1f74 \
 
 ---
 
-## 6. The live loan
+## 7. The live loan
 
 A real under-collateralized loan was drawn and repaid on Base Sepolia during the build window:
 3.000000 aUSDC principal against 2.365800 aUSDC of collateral — **78.86%**, so a fifth of the loan
@@ -115,7 +124,7 @@ was carried by the credential rather than by assets. Every transaction is linked
 [`PROOF.md`](PROOF.md), along with the moment an operator raised `min_tier` at Cleanverse and the
 on-chain verdict flipped to deny in the next block with no redeploy.
 
-## 7. The honest part
+## 8. The honest part
 
 - A **default** takes a matured loan plus a three-day grace period, so the write-off is demonstrated
   on a fork with compressed time rather than on a live chain. Everything it touches is real.

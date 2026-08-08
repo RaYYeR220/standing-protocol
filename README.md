@@ -2,6 +2,8 @@
 
 **Under-collateralized credit, where the identity is the collateral.**
 
+**[Live console](https://standing-console.vercel.app)** · [proof](PROOF.md) · [reviewer path](JUDGES.md) · [claims](CLAIMS.md)
+
 On-chain lending is stuck at over-collateralization. A pseudonymous wallet has nothing to lose, so
 every protocol demands more value than it lends — which means you can only borrow if you already
 own the money. That is not a credit market. It is leverage with extra steps.
