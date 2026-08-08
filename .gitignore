@@ -28,5 +28,8 @@ scratchpad/
 .DS_Store
 Thumbs.db
 
+# large media, hosted rather than committed
+web/public/demo/
+
 # build output
 mcp/dist/
