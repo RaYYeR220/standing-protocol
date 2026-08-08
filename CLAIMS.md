@@ -66,8 +66,11 @@ Two role-holders are impersonated, and this is the complete list:
 
 | Impersonated | Why | What it stands in for |
 |---|---|---|
-| `0xBd8428761efB5384C4945d16de56817Caa6903dF` — Cleanverse's A-Pass issuer | `POST /generate_apass` has been returning `[CV_500] CV System error` for every wallet on Monad since shortly after we minted our first two credentials | Cleanverse issuing a credential, through the same registry function they call |
+| `0xBd8428761efB5384C4945d16de56817Caa6903dF` — Cleanverse's A-Pass issuer | a fork cannot call Cleanverse's REST API, and their sandbox issues every credential at tier 50, so a walkthrough that shows tiers mattering has to issue its own | Cleanverse issuing a credential, through the same registry function and the same wallet they use |
 | `0x8F118338a1fa41E7Fa86Be19A4e8B99Ed58A6EcC` — AccessCore, which holds `MINTER_ROLE` on aUSDC | the sandbox aUSDC faucet is empty (`ERC20InsufficientBalance` from an empty institution wallet) and our institution is not whitelisted to wrap origin USDC | aUSDC being minted the way it normally is |
+
+The live deployment needs none of this — the credentials there were issued by Cleanverse through
+`POST /generate_apass`, and the aUSDC came from their faucet.
 
 We impersonate the caller. We do not substitute the contracts, stub the returns, or pre-seed state.
 There are no mock contracts anywhere outside `test/mocks/`, which exists so the unit suite can be
