@@ -163,18 +163,21 @@ forge script script/Demo.s.sol --rpc-url https://testnet-rpc.monad.xyz -vv
 
 ```
 == 4. repayment, and standing grows ==
-assets per share 1000000 -> 1006901
+assets per share 1000000 -> 1006518
 score after one repayment  522
 collateral now required    2942000000 (was higher)
 
 == 5. a default, and what it costs the identity ==
 loan #2 defaultable: true
-assets per share 1006901 -> 976031
+assets per share 1006518 -> 972491
   the loss lands on lenders, not a reserve
-pool lifetime losses       1234800000
 borrower score after default 276
 still eligible               false
 ```
+
+The share-price figures drift a little between runs — the script warps time on the fork, so accrued
+interest depends on when you run it. The scores do not: 435 → 522 on repayment, → 276 after the
+write-off, every time.
 
 `CLAIMS.md` documents exactly which two role-holders that script impersonates and why — nothing else
 in it is simulated.

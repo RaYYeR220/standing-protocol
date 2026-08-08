@@ -58,9 +58,12 @@ Five steps print in order:
    itemised — and draws 5,000 aUSDC having posted **69%** of it as collateral;
 3. four refusals: an uncredentialed recipient, a draw above the protocol ceiling, a draw beyond the
    borrower's line, and a draw by a wallet with no credential;
-4. repayment — assets per share 1.000000 → 1.006901, score 435 → 522, collateral required falls;
-5. a default — assets per share 1.006901 → 0.976031 (the loss lands on lenders, not a reserve),
+4. repayment — the share price rises by exactly the interest, score 435 → 522, collateral required falls;
+5. a default — the share price drops below par (the loss lands on lenders, not a reserve),
    score 522 → 276, and the borrower is no longer eligible.
+
+   The share-price figures drift between runs because the script warps time on the fork; the scores
+   are identical every time.
 
 Step 5 is the point of the protocol. The cost of defaulting is written against the *identity*, so it
 survives the borrower abandoning that wallet — and because Cleanverse re-issues credentials under a
