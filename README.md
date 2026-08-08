@@ -100,15 +100,24 @@ hash when someone re-verifies, the registry unions the new hash into the old rec
 defaulter could launder their history by redoing KYC, which would make the whole premise unsound.
 
 **The pool is itself a verified participant.** Cleanverse's policy engine checks both ends of a
-transfer, and the pool is a party to every disbursement, so the pool contract holds its own A-Pass.
-A verified-asset protocol should not be an anonymous intermediary standing between verified
-counterparties.
+transfer, and the pool is a party to every disbursement, so the pool contract holds its own A-Pass —
+and is registered with Cleanverse's validator, carrying its own compliance rule set. A verified-asset
+protocol should not be an anonymous intermediary standing between verified counterparties.
+
+**The rule set is live, and an operator can move it.** With the pool registered, raising `min_tier`
+to 60 through Cleanverse's API flipped the on-chain verdict for a tier-50 wallet from allow to deny
+in the next block — no redeploy, no upgrade, no code change. That is compliance policy the operator
+owns and the contract obeys, rather than policy reimplemented in Solidity and frozen at deployment.
 
 ---
 
 ## Deployed
 
-Monad testnet (chain id 10143) — [see why testnet](#honest-limits).
+Two chains, one source. Cleanverse deploys the same addresses everywhere it supports, so the
+integration is not chain-specific — the same contracts bind to the identical A-Pass registry, policy
+engine, validator and aUSDC on each.
+
+**Monad testnet** (chain id 10143)
 
 | Contract | Address |
 |---|---|
@@ -116,12 +125,24 @@ Monad testnet (chain id 10143) — [see why testnet](#honest-limits).
 | `StandingPool` | [`0x010263d8e3b2DC38F63A3f1660D2502f204ffB6D`](https://testnet.monadexplorer.com/address/0x010263d8e3b2DC38F63A3f1660D2502f204ffB6D) |
 | `StandingRegistry` | [`0x2bD8832C9Bc98df47F256507a903B0338D96C0b5`](https://testnet.monadexplorer.com/address/0x2bD8832C9Bc98df47F256507a903B0338D96C0b5) |
 
+**Base Sepolia** (chain id 84532) — where the live loans are
+
+| Contract | Address |
+|---|---|
+| `CreditManager` | [`0x324719787E22a7c2c3E77bc84484317c2D2D1093`](https://sepolia.basescan.org/address/0x324719787E22a7c2c3E77bc84484317c2D2D1093) |
+| `StandingPool` | [`0x5ae228215dae30EC07D0196B13179CFA00146D03`](https://sepolia.basescan.org/address/0x5ae228215dae30EC07D0196B13179CFA00146D03) |
+| `StandingRegistry` | [`0xE066669d09afd30444429003987b9E7BcA970F19`](https://sepolia.basescan.org/address/0xE066669d09afd30444429003987b9E7BcA970F19) |
+
+A real under-collateralized loan was drawn and repaid here during the build: 3.000000 aUSDC of
+principal against 2.365800 aUSDC of collateral — 78.86%. Transactions in [`PROOF.md`](PROOF.md).
+
 Cleanverse contracts these bind to, unchanged and not ours:
 
 | | Address |
 |---|---|
 | A-Pass registry (CVI) | `0xbA82D189540CaC9DC6FF46B6837CaC1BFdEC58B9` |
-| Policy engine (CCP) | `0x36489bE45fa84f70a0c2BDB11D824Be608CB12Dd` |
+| Policy engine — asset rules (CCP) | `0x36489bE45fa84f70a0c2BDB11D824Be608CB12Dd` |
+| Compliance validator — our rules (CCP) | `0xaC7e5179C2C7f03f209136886c172eb34F161792` |
 | aUSDC (CVA) | `0xaC0893567D43C3E7e6e35a72803df05416C1f20D` |
 
 ---
@@ -173,6 +194,10 @@ The protocol is only as good as what we can actually demonstrate, so:
 - **Testnet, not mainnet.** Cleanverse's contracts are deployed at identical addresses on Monad
   mainnet, but sandbox credentials issue credentials into testnet only. Mainnet would mean a
   deployment bound to identities we cannot create.
+- **Monad's pool is empty.** Cleanverse's USDC faucet on Monad was returning
+  `failed to execute token transfer` for the whole build window while the same call on Base worked,
+  so the live loans are on Base Sepolia. Both deployments are credentialed, registered and gated;
+  there is simply nothing to lend on Monad yet.
 - **The A-Pass attribute getter is bound by raw selector.** We have its selector, argument and
   return layout, all verified against live state and cross-checked against the REST API for the same
   wallet. We do not have its name, and the binding would break if Cleanverse changed the layout
@@ -187,8 +212,10 @@ The protocol is only as good as what we can actually demonstrate, so:
   assets in. There is a 6-decimal virtual offset against first-depositor griefing, but the surface
   exists.
 
-[`CLAIMS.md`](CLAIMS.md) states every claim this README makes with the evidence tier behind it, and
-lists what we are explicitly *not* claiming.
+[`CLAIMS.md`](CLAIMS.md) states every claim this README makes with the evidence tier behind it, lists
+what we are explicitly *not* claiming, and records the fourteen bugs we found in our own contracts by
+attacking them. [`PROOF.md`](PROOF.md) links the transactions. [`JUDGES.md`](JUDGES.md) is a
+five-minute reviewer path.
 
 ---
 
