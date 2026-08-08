@@ -150,11 +150,10 @@ Cleanverse contracts these bind to, unchanged and not ours:
 ## Run it
 
 ```bash
-git clone <this repo> && cd standing-protocol
+git clone --recurse-submodules <this repo> && cd standing-protocol
 
 # contracts
 cd contracts
-forge install
 forge test                                    # unit + invariant + fork
 forge script script/InspectCleanverse.s.sol --rpc-url https://testnet-rpc.monad.xyz
 
@@ -164,8 +163,15 @@ npm install
 npm run dev                                   # http://localhost:3000
 ```
 
-The console reads the live deployment. No API keys, no accounts, no seeded fixtures — every number
-on the screen is read from the chain, including the zeroes.
+The console reads the live deployments and switches between them; no API keys, no accounts, no
+seeded fixtures — every number on the screen is read from the chain, including the zeroes.
+
+If the recursive clone drops a submodule (GitHub occasionally does this on the larger one), fetch
+the two dependencies directly and re-run:
+
+```bash
+cd contracts && rm -rf lib &&   git clone --depth 1 https://github.com/foundry-rs/forge-std lib/forge-std &&   git clone --depth 1 -b v5.4.0 https://github.com/OpenZeppelin/openzeppelin-contracts     lib/openzeppelin-contracts
+```
 
 To deploy your own instance:
 
