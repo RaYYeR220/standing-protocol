@@ -1,6 +1,5 @@
 # deps & build
 node_modules/
-contracts/lib/
 contracts/out/
 contracts/cache/
 contracts/broadcast/
