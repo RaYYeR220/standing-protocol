@@ -1,5 +1,6 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import {
   createContext,
   useCallback,
@@ -31,6 +32,7 @@ const Ctx = createContext<SubjectCtx | null>(null);
  * screens, mirrored into the query string so a view can be linked to directly.
  */
 export function SubjectProvider({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
   const { address } = useAccount();
   const [raw, setRawState] = useState("");
   const [pinnedToWallet, setPinned] = useState(true);
@@ -61,13 +63,15 @@ export function SubjectProvider({ children }: { children: ReactNode }) {
 
   // Mirror the subject into the query string — but not before the seed has been
   // read, or navigating straight to a shared link would clear its own parameter.
+  // Re-run on navigation too: a tab is a bare href, so the parameter has to be put
+  // back after the push.
   useEffect(() => {
     if (!seeded) return;
     const url = new URL(window.location.href);
     if (subject) url.searchParams.set("a", subject);
     else url.searchParams.delete("a");
     window.history.replaceState(null, "", url);
-  }, [subject, seeded]);
+  }, [subject, seeded, pathname]);
 
   const setRaw = useCallback((v: string) => {
     setRawState(v);

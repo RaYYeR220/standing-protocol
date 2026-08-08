@@ -6,13 +6,15 @@ import { Amount, Note, Panel, Tag } from "@/components/primitives";
 import { Utilization } from "@/components/pool/Utilization";
 import { LenderDesk } from "@/components/pool/LenderDesk";
 import { PoolCredential } from "@/components/compliance/PoolCredential";
-import { ASSET_SYMBOL, CONTRACTS, SHARE_SYMBOL } from "@/lib/contracts";
+import { ASSET_SYMBOL, SHARE_SYMBOL } from "@/lib/contracts";
+import { useNetwork } from "@/lib/network";
 import { bpsToPercent, shortError } from "@/lib/format";
 import { useConvertToAssets, usePoolDecimals, usePoolScalar } from "@/lib/reads";
 import { Addr } from "@/components/primitives";
 import type { ReadState } from "@/lib/types";
 
 export default function PoolScreen() {
+  const { contracts } = useNetwork();
   const totalAssets = usePoolScalar("totalAssets");
   const available = usePoolScalar("availableLiquidity");
   const outstanding = usePoolScalar("outstandingPrincipal");
@@ -40,7 +42,7 @@ export default function PoolScreen() {
           <Panel
             label="Balance sheet"
             sub="StandingPool — ERC-4626 over aUSDC"
-            right={<Addr address={CONTRACTS.standingPool} head={8} tail={6} tone="dim" />}
+            right={<Addr address={contracts.standingPool} head={8} tail={6} tone="dim" />}
             bodyClass="p-0"
           >
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">

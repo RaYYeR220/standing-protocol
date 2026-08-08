@@ -24,7 +24,7 @@ const plexMono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "Standing Protocol — Underwriting Terminal",
   description:
-    "Under-collateralized credit on Monad, underwritten against a Cleanverse A-Pass and gated on-chain before every movement of value.",
+    "Under-collateralized credit on Monad testnet and Base Sepolia, underwritten against a Cleanverse A-Pass and gated on-chain before every movement of value.",
 };
 
 export const viewport: Viewport = {

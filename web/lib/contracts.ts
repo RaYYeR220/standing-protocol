@@ -1,15 +1,5 @@
 import type { Address } from "viem";
 
-/** Deployed on Monad testnet (chainId 10143). Mirrors contracts/deployments/monad-testnet.json. */
-export const CONTRACTS = {
-  creditManager: "0x324719787E22a7c2c3E77bc84484317c2D2D1093",
-  standingPool: "0x5ae228215dae30EC07D0196B13179CFA00146D03",
-  standingRegistry: "0xE066669d09afd30444429003987b9E7BcA970F19",
-  apassRegistry: "0xbA82D189540CaC9DC6FF46B6837CaC1BFdEC58B9",
-  policy: "0x36489bE45fa84f70a0c2BDB11D824Be608CB12Dd",
-  verifiedAsset: "0xaC0893567D43C3E7e6e35a72803df05416C1f20D",
-} as const satisfies Record<string, Address>;
-
 export const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as const;
 export const ZERO_HASH = `0x${"0".repeat(64)}` as const;
 
@@ -46,7 +36,7 @@ export const REFUSAL_PROSE: Record<RefusalName, string> = {
   AssetPolicyDenied:
     "Cleanverse's policy engine refused this transfer under the rule set attached to aUSDC. The asset carries its compliance rules with it, and they are evaluated against both counterparties on-chain, inside the transaction.",
   ProtocolPolicyDenied:
-    "Standing Protocol is registered as a policy subject at Cleanverse and its own rule set refused this transfer. An operator can tighten who may borrow or lend by changing a rule off-chain, and the contracts obey without being redeployed.",
+    "Standing Protocol is registered with Cleanverse's validator and carries its own rule set. The validator is asked about each party separately, and it refused this one. An operator can tighten who may borrow or lend by changing that rule off-chain, and the contracts obey from the next block without being redeployed.",
 };
 
 /** Mirrors CreditManager.Status. */
@@ -63,7 +53,7 @@ export const APASS_STATUS: Record<number, string> = {
 /** StandingMath constants, so each component can be shown against its ceiling. */
 export const SCORING = {
   MAX_SCORE: 1000,
-  MIN_SCORE: 400,
+  MIN_SCORE: 300,
   IDENTITY_MAX: 400,
   HISTORY_MAX: 350,
   ASSETS_MAX: 250,
@@ -80,6 +70,37 @@ export const SCORING = {
   MIN_APR_BPS: 500,
   MAX_APR_BPS: 2500,
 } as const;
+
+/**
+ * StandingMath._tierPoints. Banded, not linear: Cleanverse's 0–99 tier encodes a
+ * verification standard rather than a continuous quantity, so one point of it is
+ * not a hundredth of a bank's confidence. The bands are where the standard changes.
+ */
+export const TIER_BANDS: { from: number; points: number }[] = [
+  { from: 90, points: 300 },
+  { from: 75, points: 265 },
+  { from: 60, points: 230 },
+  { from: 45, points: 210 },
+  { from: 30, points: 140 },
+  { from: 15, points: 80 },
+  { from: 1, points: 30 },
+];
+
+/** The band a tier falls in, or undefined at tier 0 — which scores nothing. */
+export function tierBand(tier: number) {
+  return TIER_BANDS.find((b) => tier >= b.from);
+}
+
+/** The derivation string shown on the `tierPoints` row. */
+export function tierBandLabel(tier: number) {
+  // The table runs high to low, so the band immediately above is the previous entry.
+  const i = TIER_BANDS.findIndex((b) => tier >= b.from);
+  if (i === -1) return "tier 0 — below every band, so no identity points at all";
+  const band = TIER_BANDS[i];
+  const above = TIER_BANDS[i - 1];
+  const range = above ? `${band.from}–${above.from - 1}` : `${band.from}–99`;
+  return `tier ${tier} lands in the ${range} band — ${band.points} of ${SCORING.TIER_MAX}, banded rather than pro-rata`;
+}
 
 /** The base-10 ladder in StandingMath._assetPoints, for showing the next rung. */
 export const ASSET_LADDER: { threshold: bigint; points: number }[] = [
@@ -100,10 +121,13 @@ export const MIN_QUALIFYING_HOLD = 24 * 60 * 60;
 
 /**
  * Addresses whose live on-chain state is worth putting in front of a reader.
- * Addresses only — every attribute rendered beside them is read from chain.
+ * Addresses only — every attribute rendered beside them is read from chain, and
+ * every one of them resolves on both deployments.
  */
 export const REFERENCE_WALLETS: { address: Address; label: string }[] = [
   { address: "0xBBe8DB07Eaf9C4Ac1AAA46e4197AD22AA7041F3F", label: "WALLET A" },
   { address: "0x9E2816003da34Ea0E232Fb59A5e475Fce1121d98", label: "WALLET B" },
-  { address: "0x68dC37636DA76a24eDFb0e1B308123Eb4cd50EAA", label: "WALLET C" },
+  // Not a burn address and not a vanity one — just an address nobody has ever
+  // credentialled, which is the only way to show the refusal honestly.
+  { address: "0xABc0000000000000000000000000000000000123", label: "WALLET C" },
 ];

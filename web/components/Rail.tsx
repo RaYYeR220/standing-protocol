@@ -1,17 +1,27 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useAccount, useBlockNumber, useConnect, useDisconnect } from "wagmi";
+import {
+  useAccount,
+  useBlockNumber,
+  useConnect,
+  useDisconnect,
+  useSwitchChain,
+} from "wagmi";
 import { Mark } from "./Mark";
+import { NetworkSwitch } from "./NetworkSwitch";
 import { Addr } from "./primitives";
-import { monadTestnet } from "@/lib/chain";
+import { useNetwork } from "@/lib/network";
 
 /** The rail carries proof the console is live: chain id, height, and who is signing. */
 export function Rail() {
+  const { deployment, chainId: targetChainId } = useNetwork();
   const { address, isConnected, chainId } = useAccount();
   const { connect, connectors, isPending } = useConnect();
   const { disconnect } = useDisconnect();
+  const { switchChain, isPending: isSwitching } = useSwitchChain();
   const { data: block, error: blockError } = useBlockNumber({
+    chainId: targetChainId,
     watch: { poll: true, pollingInterval: 4_000 },
   });
 
@@ -19,7 +29,7 @@ export function Rail() {
   useEffect(() => setMounted(true), []);
 
   const injectedConnector = connectors.find((c) => c.id === "injected") ?? connectors[0];
-  const wrongChain = mounted && isConnected && chainId !== monadTestnet.id;
+  const wrongChain = mounted && isConnected && chainId !== targetChainId;
 
   return (
     <header className="sticky top-0 z-30 border-b border-[var(--color-line)] bg-[var(--color-ink-deep)]/95 backdrop-blur-sm">
@@ -36,10 +46,10 @@ export function Rail() {
         {/* telemetry */}
         <div className="hidden flex-1 items-center gap-6 border-l border-[var(--color-line)] pl-5 md:flex">
           <Telemetry label="Network">
-            <span className="num text-[0.75rem]">MONAD TESTNET</span>
+            <span className="num text-[0.75rem]">{deployment.label}</span>
           </Telemetry>
           <Telemetry label="Chain">
-            <span className="num text-[0.75rem]">{monadTestnet.id}</span>
+            <span className="num text-[0.75rem]">{targetChainId}</span>
           </Telemetry>
           <Telemetry label="Block">
             {blockError ? (
@@ -60,10 +70,24 @@ export function Rail() {
           </Telemetry>
         </div>
 
+        {/* deployment */}
+        <div className="ml-auto flex items-center border-l border-[var(--color-line)] py-2 pl-5 md:ml-0">
+          <Telemetry label="Deployment">
+            <NetworkSwitch />
+          </Telemetry>
+        </div>
+
         {/* signer */}
         <div className="flex items-center gap-3 border-l border-[var(--color-line)] py-2 pl-5">
           {wrongChain ? (
-            <span className="chip chip-deny">WRONG CHAIN</span>
+            <button
+              className="chip chip-deny cursor-pointer"
+              disabled={isSwitching}
+              title={`Signer is on chain ${chainId}; switch it to ${deployment.chain.name}`}
+              onClick={() => switchChain({ chainId: targetChainId })}
+            >
+              {isSwitching ? "SWITCHING…" : "WRONG CHAIN"}
+            </button>
           ) : null}
           {mounted && isConnected && address ? (
             <>

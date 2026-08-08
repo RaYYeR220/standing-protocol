@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { Colonnade } from "../Colonnade";
 import { Amount, Bar, Empty, Fault, Note, Panel, Tag } from "../primitives";
-import { ASSET_LADDER, ASSET_SYMBOL, SCORING } from "@/lib/contracts";
+import { ASSET_LADDER, ASSET_SYMBOL, SCORING, tierBandLabel } from "@/lib/contracts";
 import { formatUnits6, groupDigits } from "@/lib/format";
 import type { Credential, History, Quote } from "@/lib/types";
 
@@ -12,6 +12,7 @@ type Props = {
   credential: Credential | undefined;
   history: History | undefined;
   balance: bigint | undefined;
+  walletDefaults: number | undefined;
 };
 
 /**
@@ -19,7 +20,7 @@ type Props = {
  * breakdown for exactly this reason: a borrower refused credit is entitled to see
  * which input refused them.
  */
-export function StandingPanel({ quote, credential, history, balance }: Props) {
+export function StandingPanel({ quote, credential, history, balance, walletDefaults }: Props) {
   if (quote.error) {
     return (
       <Panel label="Standing" sub="quote(borrower, amount, term)">
@@ -57,6 +58,10 @@ export function StandingPanel({ quote, credential, history, balance }: Props) {
     credential && credential.issuedAt > 0n
       ? Math.max(0, Math.floor((nowSec - Number(credential.issuedAt)) / 86_400))
       : 0;
+
+  // The penalty takes the worse of the two records, never their sum: one write-off is
+  // recorded against both the identity and the wallet, and is paid for once.
+  const countedDefaults = Math.max(history?.loansDefaulted ?? 0, walletDefaults ?? 0);
 
   const repaidCounted = history ? Math.min(history.loansRepaid, SCORING.REPAID_CAP) : 0;
   const volumeUnits = history
@@ -159,7 +164,7 @@ export function StandingPanel({ quote, credential, history, balance }: Props) {
               name="tierPoints"
               derivation={
                 credLive && credential
-                  ? `tier ${credential.tier} × 300 ÷ 99`
+                  ? tierBandLabel(credential.tier)
                   : "no live credential to read a tier from"
               }
               points={Number(b.tierPoints)}
@@ -208,9 +213,11 @@ export function StandingPanel({ quote, credential, history, balance }: Props) {
             />
             <Line
               name="defaultPenalty"
-              derivation={`${history?.loansDefaulted ?? 0} write-off${
-                (history?.loansDefaulted ?? 0) === 1 ? "" : "s"
-              } × 250 — subtracted, not capped`}
+              derivation={`max(identity ${history?.loansDefaulted ?? 0}, wallet ${
+                walletDefaults ?? 0
+              }) = ${countedDefaults} write-off${
+                countedDefaults === 1 ? "" : "s"
+              } × ${SCORING.DEFAULT_PENALTY} — subtracted, not capped`}
               points={-Number(b.defaultPenalty)}
               cap={0}
               negative

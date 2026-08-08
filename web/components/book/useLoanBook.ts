@@ -2,8 +2,8 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { creditManagerAbi } from "@/lib/abi";
-import { inWaves, publicClient } from "@/lib/client";
-import { CONTRACTS } from "@/lib/contracts";
+import { inWaves, publicClientFor } from "@/lib/client";
+import { useNetwork } from "@/lib/network";
 import type { Loan, LoanRow } from "@/lib/types";
 
 /**
@@ -11,12 +11,14 @@ import type { Loan, LoanRow } from "@/lib/types";
  * run in bounded waves so a large book does not trip the public endpoint's limits.
  */
 export function useLoanBook() {
+  const { key, contracts } = useNetwork();
   return useQuery({
-    queryKey: ["loan-book"],
+    queryKey: ["loan-book", key, contracts.creditManager],
     refetchInterval: 15_000,
     queryFn: async (): Promise<{ count: number; rows: LoanRow[] }> => {
-      const count = (await publicClient.readContract({
-        address: CONTRACTS.creditManager,
+      const client = publicClientFor(key);
+      const count = (await client.readContract({
+        address: contracts.creditManager,
         abi: creditManagerAbi,
         functionName: "loanCount",
       })) as bigint;
@@ -27,14 +29,14 @@ export function useLoanBook() {
       const ids = Array.from({ length: n }, (_, i) => i + 1);
       const rows = await inWaves(ids, 5, async (id) => {
         const [loan, defaultable] = await Promise.all([
-          publicClient.readContract({
-            address: CONTRACTS.creditManager,
+          client.readContract({
+            address: contracts.creditManager,
             abi: creditManagerAbi,
             functionName: "loan",
             args: [BigInt(id)],
           }) as Promise<Loan>,
-          publicClient.readContract({
-            address: CONTRACTS.creditManager,
+          client.readContract({
+            address: contracts.creditManager,
             abi: creditManagerAbi,
             functionName: "isDefaultable",
             args: [BigInt(id)],

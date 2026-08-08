@@ -3,16 +3,17 @@
 import { useReadContract } from "wagmi";
 import type { Address, Hex } from "viem";
 import {
-  cleanversePolicyAbi,
+  cleanverseValidatorAbi,
+  complianceGateAbi,
   creditManagerAbi,
   erc20Abi,
   standingPoolAbi,
   standingRegistryAbi,
 } from "./abi";
-import { CONTRACTS } from "./contracts";
+import { useNetwork } from "./network";
 import type { Credential, History, Quote, ReadState } from "./types";
 
-/** Polling cadence. The endpoint is a shared public node, so this is deliberately unhurried. */
+/** Polling cadence. The endpoints are shared public nodes, so this is deliberately unhurried. */
 const LIVE = 12_000;
 const SLOW = 60_000;
 /** Deployment-time constants never change; read once. */
@@ -29,8 +30,10 @@ function state<T>(r: {
 /* ------------------------------------------------------------------ identity */
 
 export function useCredential(party: Address | undefined): ReadState<Credential> {
+  const { contracts, chainId } = useNetwork();
   const r = useReadContract({
-    address: CONTRACTS.creditManager,
+    chainId,
+    address: contracts.creditManager,
     abi: creditManagerAbi,
     functionName: "credentialOf",
     args: party ? [party] : undefined,
@@ -41,8 +44,10 @@ export function useCredential(party: Address | undefined): ReadState<Credential>
 
 /** `checkParty` → [ok, refusalCode] */
 export function useCheckParty(party: Address | undefined): ReadState<readonly [boolean, number]> {
+  const { contracts, chainId } = useNetwork();
   const r = useReadContract({
-    address: CONTRACTS.creditManager,
+    chainId,
+    address: contracts.creditManager,
     abi: creditManagerAbi,
     functionName: "checkParty",
     args: party ? [party] : undefined,
@@ -57,9 +62,11 @@ export function useCheckTransfer(
   to: Address | undefined,
   amount: bigint | undefined,
 ): ReadState<readonly [boolean, number, Address]> {
+  const { contracts, chainId } = useNetwork();
   const ready = Boolean(from && to && amount !== undefined);
   const r = useReadContract({
-    address: CONTRACTS.creditManager,
+    chainId,
+    address: contracts.creditManager,
     abi: creditManagerAbi,
     functionName: "checkTransferDetailed",
     args: ready ? [from as Address, to as Address, amount as bigint] : undefined,
@@ -69,8 +76,10 @@ export function useCheckTransfer(
 }
 
 export function useCanonicalIdentity(kycHash: Hex | undefined): ReadState<Hex> {
+  const { contracts, chainId } = useNetwork();
   const r = useReadContract({
-    address: CONTRACTS.standingRegistry,
+    chainId,
+    address: contracts.standingRegistry,
     abi: standingRegistryAbi,
     functionName: "canonicalIdentity",
     args: kycHash ? [kycHash] : undefined,
@@ -79,9 +88,25 @@ export function useCanonicalIdentity(kycHash: Hex | undefined): ReadState<Hex> {
   return state<Hex>(r);
 }
 
-export function useHistory(kycHash: Hex | undefined): ReadState<History> {
+/** The identity a credential replaced, as the registry recorded it. */
+export function useSupersedes(kycHash: Hex | undefined): ReadState<Hex> {
+  const { contracts, chainId } = useNetwork();
   const r = useReadContract({
-    address: CONTRACTS.standingRegistry,
+    chainId,
+    address: contracts.standingRegistry,
+    abi: standingRegistryAbi,
+    functionName: "supersedes",
+    args: kycHash ? [kycHash] : undefined,
+    query: { enabled: Boolean(kycHash), refetchInterval: SLOW },
+  });
+  return state<Hex>(r);
+}
+
+export function useHistory(kycHash: Hex | undefined): ReadState<History> {
+  const { contracts, chainId } = useNetwork();
+  const r = useReadContract({
+    chainId,
+    address: contracts.standingRegistry,
     abi: standingRegistryAbi,
     functionName: "historyOf",
     args: kycHash ? [kycHash] : undefined,
@@ -90,9 +115,28 @@ export function useHistory(kycHash: Hex | undefined): ReadState<History> {
   return state<History>(r);
 }
 
-export function useWallets(kycHash: Hex | undefined): ReadState<readonly Address[]> {
+/**
+ * Write-offs recorded against the wallet itself rather than against the identity.
+ * The score penalty takes the worse of the two, so neither record can be shed.
+ */
+export function useWalletDefaults(wallet: Address | undefined): ReadState<number> {
+  const { contracts, chainId } = useNetwork();
   const r = useReadContract({
-    address: CONTRACTS.standingRegistry,
+    chainId,
+    address: contracts.standingRegistry,
+    abi: standingRegistryAbi,
+    functionName: "walletDefaults",
+    args: wallet ? [wallet] : undefined,
+    query: { enabled: Boolean(wallet), refetchInterval: LIVE },
+  });
+  return state<number>(r);
+}
+
+export function useWallets(kycHash: Hex | undefined): ReadState<readonly Address[]> {
+  const { contracts, chainId } = useNetwork();
+  const r = useReadContract({
+    chainId,
+    address: contracts.standingRegistry,
     abi: standingRegistryAbi,
     functionName: "walletsOf",
     args: kycHash ? [kycHash] : undefined,
@@ -102,8 +146,10 @@ export function useWallets(kycHash: Hex | undefined): ReadState<readonly Address
 }
 
 export function useDrawnByIdentity(kycHash: Hex | undefined): ReadState<bigint> {
+  const { contracts, chainId } = useNetwork();
   const r = useReadContract({
-    address: CONTRACTS.creditManager,
+    chainId,
+    address: contracts.creditManager,
     abi: creditManagerAbi,
     functionName: "drawnByIdentity",
     args: kycHash ? [kycHash] : undefined,
@@ -119,8 +165,10 @@ export function useQuote(
   amount: bigint,
   termSeconds: bigint,
 ): ReadState<Quote> {
+  const { contracts, chainId } = useNetwork();
   const r = useReadContract({
-    address: CONTRACTS.creditManager,
+    chainId,
+    address: contracts.creditManager,
     abi: creditManagerAbi,
     functionName: "quote",
     args: borrower ? [borrower, amount, termSeconds] : undefined,
@@ -133,8 +181,10 @@ function useManagerConstant(
   functionName: "maxLoanPrincipal" | "maxCreditLine" | "maxTermSeconds" | "MIN_LOAN_PRINCIPAL" | "MIN_TERM_SECONDS" | "GRACE_PERIOD" | "loanCount",
   interval: number,
 ): ReadState<bigint> {
+  const { contracts, chainId } = useNetwork();
   const r = useReadContract({
-    address: CONTRACTS.creditManager,
+    chainId,
+    address: contracts.creditManager,
     abi: creditManagerAbi,
     functionName,
     query: { refetchInterval: interval === FROZEN ? false : interval, staleTime: interval === FROZEN ? Infinity : undefined },
@@ -161,8 +211,10 @@ type PoolScalar =
   | "totalSupply";
 
 export function usePoolScalar(functionName: PoolScalar): ReadState<bigint> {
+  const { contracts, chainId } = useNetwork();
   const r = useReadContract({
-    address: CONTRACTS.standingPool,
+    chainId,
+    address: contracts.standingPool,
     abi: standingPoolAbi,
     functionName,
     query: { refetchInterval: LIVE },
@@ -171,8 +223,10 @@ export function usePoolScalar(functionName: PoolScalar): ReadState<bigint> {
 }
 
 export function usePoolDecimals(): ReadState<number> {
+  const { contracts, chainId } = useNetwork();
   const r = useReadContract({
-    address: CONTRACTS.standingPool,
+    chainId,
+    address: contracts.standingPool,
     abi: standingPoolAbi,
     functionName: "decimals",
     query: { staleTime: Infinity },
@@ -181,8 +235,10 @@ export function usePoolDecimals(): ReadState<number> {
 }
 
 export function useConvertToAssets(shares: bigint | undefined): ReadState<bigint> {
+  const { contracts, chainId } = useNetwork();
   const r = useReadContract({
-    address: CONTRACTS.standingPool,
+    chainId,
+    address: contracts.standingPool,
     abi: standingPoolAbi,
     functionName: "convertToAssets",
     args: shares !== undefined ? [shares] : undefined,
@@ -192,8 +248,10 @@ export function useConvertToAssets(shares: bigint | undefined): ReadState<bigint
 }
 
 export function useShareBalance(owner: Address | undefined): ReadState<bigint> {
+  const { contracts, chainId } = useNetwork();
   const r = useReadContract({
-    address: CONTRACTS.standingPool,
+    chainId,
+    address: contracts.standingPool,
     abi: standingPoolAbi,
     functionName: "balanceOf",
     args: owner ? [owner] : undefined,
@@ -203,8 +261,10 @@ export function useShareBalance(owner: Address | undefined): ReadState<bigint> {
 }
 
 export function useMaxWithdraw(owner: Address | undefined): ReadState<bigint> {
+  const { contracts, chainId } = useNetwork();
   const r = useReadContract({
-    address: CONTRACTS.standingPool,
+    chainId,
+    address: contracts.standingPool,
     abi: standingPoolAbi,
     functionName: "maxWithdraw",
     args: owner ? [owner] : undefined,
@@ -214,8 +274,10 @@ export function useMaxWithdraw(owner: Address | undefined): ReadState<bigint> {
 }
 
 export function useMaxDeposit(receiver: Address | undefined): ReadState<bigint> {
+  const { contracts, chainId } = useNetwork();
   const r = useReadContract({
-    address: CONTRACTS.standingPool,
+    chainId,
+    address: contracts.standingPool,
     abi: standingPoolAbi,
     functionName: "maxDeposit",
     args: receiver ? [receiver] : undefined,
@@ -225,8 +287,10 @@ export function useMaxDeposit(receiver: Address | undefined): ReadState<bigint> 
 }
 
 export function usePreviewDeposit(assets: bigint | undefined): ReadState<bigint> {
+  const { contracts, chainId } = useNetwork();
   const r = useReadContract({
-    address: CONTRACTS.standingPool,
+    chainId,
+    address: contracts.standingPool,
     abi: standingPoolAbi,
     functionName: "previewDeposit",
     args: assets !== undefined ? [assets] : undefined,
@@ -238,8 +302,10 @@ export function usePreviewDeposit(assets: bigint | undefined): ReadState<bigint>
 /* ---------------------------------------------------------------------- asset */
 
 export function useAssetBalance(owner: Address | undefined): ReadState<bigint> {
+  const { contracts, chainId } = useNetwork();
   const r = useReadContract({
-    address: CONTRACTS.verifiedAsset,
+    chainId,
+    address: contracts.verifiedAsset,
     abi: erc20Abi,
     functionName: "balanceOf",
     args: owner ? [owner] : undefined,
@@ -252,8 +318,10 @@ export function useAllowance(
   owner: Address | undefined,
   spender: Address,
 ): ReadState<bigint> {
+  const { contracts, chainId } = useNetwork();
   const r = useReadContract({
-    address: CONTRACTS.verifiedAsset,
+    chainId,
+    address: contracts.verifiedAsset,
     abi: erc20Abi,
     functionName: "allowance",
     args: owner ? [owner, spender] : undefined,
@@ -264,11 +332,51 @@ export function useAllowance(
 
 /* --------------------------------------------------------------------- policy */
 
-export function useIsTokenRegistered(subject: Address): ReadState<boolean> {
+/**
+ * `ComplianceGate.isProtocolRegistered()` — whether this contract carries its own
+ * rule set with Cleanverse's validator. Asked of the contract itself rather than
+ * of the validator, because that is the answer the gate acts on.
+ */
+export function useIsProtocolRegistered(which: "creditManager" | "standingPool"): ReadState<boolean> {
+  const { contracts, chainId } = useNetwork();
   const r = useReadContract({
-    address: CONTRACTS.policy,
-    abi: cleanversePolicyAbi,
-    functionName: "isTokenRegistered",
+    chainId,
+    address: contracts[which],
+    abi: complianceGateAbi,
+    functionName: "isProtocolRegistered",
+    query: { refetchInterval: SLOW },
+  });
+  return state<boolean>(r);
+}
+
+/** `checkParty`, asked of either of the protocol's own gated contracts. */
+export function useGateCheckParty(
+  which: "creditManager" | "standingPool",
+  party: Address | undefined,
+): ReadState<readonly [boolean, number]> {
+  const { contracts, chainId } = useNetwork();
+  const r = useReadContract({
+    chainId,
+    address: contracts[which],
+    abi: complianceGateAbi,
+    functionName: "checkParty",
+    args: party ? [party] : undefined,
+    query: { enabled: Boolean(party), refetchInterval: LIVE },
+  });
+  return state<readonly [boolean, number]>(r);
+}
+
+/**
+ * The validator's own registration flag, asked of the validator rather than of the
+ * protocol. The same fact as `isProtocolRegistered`, read from the other side.
+ */
+export function useValidatorRegistered(subject: Address): ReadState<boolean> {
+  const { contracts, chainId } = useNetwork();
+  const r = useReadContract({
+    chainId,
+    address: contracts.validator,
+    abi: cleanverseValidatorAbi,
+    functionName: "isRegistered",
     args: [subject],
     query: { refetchInterval: SLOW },
   });

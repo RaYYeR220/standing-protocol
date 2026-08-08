@@ -4,11 +4,11 @@ import { useMemo } from "react";
 import type { Address } from "viem";
 import { useAccount, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
 import { creditManagerAbi, erc20Abi } from "@/lib/abi";
-import { ASSET_SYMBOL, CONTRACTS, REFUSAL_PROSE, refusalName, SCORING } from "@/lib/contracts";
+import { ASSET_SYMBOL, REFUSAL_PROSE, refusalName, SCORING } from "@/lib/contracts";
 import { bpsToPercent, durationLabel, formatTimestamp, formatUnits6, shortError } from "@/lib/format";
 import { useAllowance, useAssetBalance } from "@/lib/reads";
 import type { Quote } from "@/lib/types";
-import { explorerTx } from "@/lib/chain";
+import { useNetwork } from "@/lib/network";
 import { Amount, Empty, Fault, Note, Panel, Pct, Row, Tag } from "../primitives";
 
 const TERM_PRESETS: { days: number; label: string }[] = [
@@ -50,16 +50,17 @@ export function OfferPanel({
   maxTermSeconds,
   availableLiquidity,
 }: Props) {
+  const { contracts, chainId } = useNetwork();
   const { address: connected } = useAccount();
   const isSelf = Boolean(connected && connected.toLowerCase() === subject.toLowerCase());
 
-  const allowance = useAllowance(isSelf ? connected : undefined, CONTRACTS.creditManager);
+  const allowance = useAllowance(isSelf ? connected : undefined, contracts.creditManager);
   const balance = useAssetBalance(isSelf ? connected : undefined);
 
   const approve = useWriteContract();
   const open = useWriteContract();
-  const approveRc = useWaitForTransactionReceipt({ hash: approve.data });
-  const openRc = useWaitForTransactionReceipt({ hash: open.data });
+  const approveRc = useWaitForTransactionReceipt({ chainId, hash: approve.data });
+  const openRc = useWaitForTransactionReceipt({ chainId, hash: open.data });
 
   const q = quote.data;
   const termSeconds = BigInt(termDays * 86_400);
@@ -369,10 +370,11 @@ export function OfferPanel({
                     disabled={!needsApproval || approve.isPending || approveRc.isLoading}
                     onClick={() =>
                       approve.writeContract({
-                        address: CONTRACTS.verifiedAsset,
+                        chainId,
+                        address: contracts.verifiedAsset,
                         abi: erc20Abi,
                         functionName: "approve",
-                        args: [CONTRACTS.creditManager, q.collateralRequired],
+                        args: [contracts.creditManager, q.collateralRequired],
                       })
                     }
                   >
@@ -390,7 +392,8 @@ export function OfferPanel({
                     }
                     onClick={() =>
                       open.writeContract({
-                        address: CONTRACTS.creditManager,
+                        chainId,
+                        address: contracts.creditManager,
                         abi: creditManagerAbi,
                         functionName: "open",
                         args: [amount, termSeconds],
@@ -424,6 +427,7 @@ function TxState({
   write: WriteLike;
   receipt: ReceiptLike;
 }) {
+  const { txUrl } = useNetwork();
   const err = write.error ?? receipt.error;
   if (err) {
     return (
@@ -438,7 +442,7 @@ function TxState({
   if (!write.data) return null;
   return (
     <a
-      href={explorerTx(write.data)}
+      href={txUrl(write.data)}
       target="_blank"
       rel="noreferrer"
       className="flex items-center justify-between border border-[var(--color-line-lift)] px-2 py-1.5 hover:border-[var(--color-teal)]"

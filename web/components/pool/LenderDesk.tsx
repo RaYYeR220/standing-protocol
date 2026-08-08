@@ -3,8 +3,8 @@
 import { useMemo, useState } from "react";
 import { useAccount, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
 import { erc20Abi, standingPoolAbi } from "@/lib/abi";
-import { ASSET_SYMBOL, CONTRACTS, REFUSAL_PROSE, refusalName, SHARE_SYMBOL } from "@/lib/contracts";
-import { explorerTx } from "@/lib/chain";
+import { ASSET_SYMBOL, REFUSAL_PROSE, refusalName, SHARE_SYMBOL } from "@/lib/contracts";
+import { useNetwork } from "@/lib/network";
 import { formatUnits6, parseUnits6, shortError } from "@/lib/format";
 import {
   useAllowance,
@@ -24,6 +24,7 @@ import { Amount, Empty, Panel, Row, Tag } from "../primitives";
  * The preflight is `checkTransferDetailed`, not the ERC-4626 caps — see the note.
  */
 export function LenderDesk() {
+  const { contracts, chainId } = useNetwork();
   const { address, isConnected } = useAccount();
   const [tab, setTab] = useState<"deposit" | "withdraw">("deposit");
   const [input, setInput] = useState("100");
@@ -33,7 +34,7 @@ export function LenderDesk() {
   const assetBalance = useAssetBalance(address);
   const shares = useShareBalance(address);
   const shareDecimals = usePoolDecimals();
-  const allowance = useAllowance(address, CONTRACTS.standingPool);
+  const allowance = useAllowance(address, contracts.standingPool);
   const maxDeposit = useMaxDeposit(address);
   const maxWithdraw = useMaxWithdraw(address);
   const previewShares = usePreviewDeposit(amount > 0n ? amount : undefined);
@@ -42,14 +43,14 @@ export function LenderDesk() {
   const depositCheck = useCheckTransfer(address, address, amount);
   // withdraw → _requireParty(owner) then _requireCompliant(pool, receiver, assets)
   const ownerCheck = useCheckParty(address);
-  const payoutCheck = useCheckTransfer(CONTRACTS.standingPool, address, amount);
+  const payoutCheck = useCheckTransfer(contracts.standingPool, address, amount);
 
   const approve = useWriteContract();
   const deposit = useWriteContract();
   const withdraw = useWriteContract();
-  const approveRc = useWaitForTransactionReceipt({ hash: approve.data });
-  const depositRc = useWaitForTransactionReceipt({ hash: deposit.data });
-  const withdrawRc = useWaitForTransactionReceipt({ hash: withdraw.data });
+  const approveRc = useWaitForTransactionReceipt({ chainId, hash: approve.data });
+  const depositRc = useWaitForTransactionReceipt({ chainId, hash: deposit.data });
+  const withdrawRc = useWaitForTransactionReceipt({ chainId, hash: withdraw.data });
 
   const needsApproval =
     allowance.data !== undefined && amount > 0n && allowance.data < amount;
@@ -267,10 +268,11 @@ export function LenderDesk() {
                   disabled={!needsApproval || approve.isPending || approveRc.isLoading}
                   onClick={() =>
                     approve.writeContract({
-                      address: CONTRACTS.verifiedAsset,
+                      chainId,
+                      address: contracts.verifiedAsset,
                       abi: erc20Abi,
                       functionName: "approve",
-                      args: [CONTRACTS.standingPool, amount],
+                      args: [contracts.standingPool, amount],
                     })
                   }
                 >
@@ -285,7 +287,8 @@ export function LenderDesk() {
                   disabled={!clear || deposit.isPending || depositRc.isLoading}
                   onClick={() =>
                     deposit.writeContract({
-                      address: CONTRACTS.standingPool,
+                      chainId,
+                      address: contracts.standingPool,
                       abi: standingPoolAbi,
                       functionName: "deposit",
                       args: [amount, address],
@@ -304,7 +307,8 @@ export function LenderDesk() {
                   disabled={!clear || withdraw.isPending || withdrawRc.isLoading}
                   onClick={() =>
                     withdraw.writeContract({
-                      address: CONTRACTS.standingPool,
+                      chainId,
+                      address: contracts.standingPool,
                       abi: standingPoolAbi,
                       functionName: "withdraw",
                       args: [amount, address, address],
@@ -345,6 +349,7 @@ function Tx({
   write: WriteLike;
   receipt: ReceiptLike;
 }) {
+  const { txUrl } = useNetwork();
   const err = write.error ?? receipt.error;
   if (err) {
     return (
@@ -359,7 +364,7 @@ function Tx({
   if (!write.data) return null;
   return (
     <a
-      href={explorerTx(write.data)}
+      href={txUrl(write.data)}
       target="_blank"
       rel="noreferrer"
       className="flex items-center justify-between border border-[var(--color-line-lift)] px-2 py-1.5 hover:border-[var(--color-teal)]"

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { explorerAddress } from "@/lib/chain";
+import { useNetwork } from "@/lib/network";
 import { ASSET_DECIMALS, ASSET_SYMBOL } from "@/lib/contracts";
 import {
   bpsToPercent,
@@ -274,6 +274,7 @@ export function Addr({
   tone?: "normal" | "teal" | "refuse" | "dim";
   link?: boolean;
 }) {
+  const { addressUrl } = useNetwork();
   const tones = {
     normal: "text-[var(--color-bone)]",
     teal: "text-[var(--color-teal)]",
@@ -289,7 +290,7 @@ export function Addr({
   if (!link) return body;
   return (
     <a
-      href={explorerAddress(address)}
+      href={addressUrl(address)}
       target="_blank"
       rel="noreferrer"
       title={address}

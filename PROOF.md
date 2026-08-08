@@ -60,6 +60,10 @@ Base Sepolia, all within the build window. Read them in order.
 | Borrower approves the credit manager | [`0x37e59b7d…`](https://sepolia.basescan.org/tx/0x37e59b7d4a1ac7ce17e0623136eb3456eb92703f7ca1a9274b14f5a48560dce7) |
 | **Borrower draws 3 aUSDC against 2.3658 aUSDC of collateral** | [`0xea340ac8…`](https://sepolia.basescan.org/tx/0xea340ac87d37f532caed0786e356be0cb069ef78978480710f0e326aef9eb137) |
 | **Borrower repays** — loan closes, interest lands on the share price | [`0xbfab48bd…`](https://sepolia.basescan.org/tx/0xbfab48bda6d4c0e69e0282bcf441639fab65f5d957b3355244034c7dd863c8df) |
+| **A second, larger draw** — 5 aUSDC against 3.943, still open | [`0xe1cd60aa…`](https://sepolia.basescan.org/tx/0xe1cd60aa0b30b718af104d05ca70837c5b9e926fc2b246a3ed0c49a01f0b1655) |
+
+The book now holds one repaid loan and one live one, at 26.93% utilization — the console's loan-book
+screen on Base Sepolia is reading exactly that.
 
 The draw is the one that matters. The borrower received **3.000000 aUSDC** and posted
 **2.365800 aUSDC** — **78.86%** of the principal. The missing 21% is not collateralized by anything.

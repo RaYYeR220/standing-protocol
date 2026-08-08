@@ -11,6 +11,7 @@ import {
   useMinLoanPrincipal,
   usePoolScalar,
   useQuote,
+  useWalletDefaults,
 } from "@/lib/reads";
 import { parseUnits6 } from "@/lib/format";
 import { ZERO_HASH } from "@/lib/contracts";
@@ -37,6 +38,7 @@ export default function BorrowerScreen() {
       ? credential.data.kycHash
       : undefined;
   const history = useHistory(kycHash);
+  const walletDefaults = useWalletDefaults(subject);
   const quote = useQuote(subject, amount, termSeconds);
 
   const minLoanPrincipal = useMinLoanPrincipal();
@@ -61,6 +63,7 @@ export default function BorrowerScreen() {
               credential={credential.data}
               history={history.data}
               balance={balance.data}
+              walletDefaults={walletDefaults.data}
             />
             <OfferPanel
               subject={subject}
@@ -78,7 +81,7 @@ export default function BorrowerScreen() {
           </div>
           <div className="min-w-0 space-y-4">
             <CredentialPanel subject={subject} />
-            <HistoryPanel kycHash={kycHash} />
+            <HistoryPanel kycHash={kycHash} subject={subject} />
             <CeilingsPanel />
           </div>
         </div>

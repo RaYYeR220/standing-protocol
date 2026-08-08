@@ -1,13 +1,34 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Address } from "viem";
-import { publicClient } from "@/lib/client";
-import { cleanversePolicyAbi, creditManagerAbi } from "@/lib/abi";
-import { CONTRACTS, refusalName } from "@/lib/contracts";
+import { encodeAbiParameters, parseAbiParameters, type Address, type Hex } from "viem";
+import { publicClientFor } from "@/lib/client";
+import { cleanversePolicyAbi, complianceGateAbi, creditManagerAbi } from "@/lib/abi";
+import { refusalName } from "@/lib/contracts";
+import { useNetwork } from "@/lib/network";
 import { revertSelector, shortError, truncateMid } from "@/lib/format";
 
-/** A revert from the policy engine, said plainly. Fail-closed is the point. */
+/**
+ * The validator's per-party verdict. Cleanverse publishes no name for it, so it is
+ * bound by raw selector exactly as ComplianceGate binds it, and the returned word is
+ * compared to 1 rather than decoded as a bool — a malformed answer is a refusal, not
+ * a thrown decode.
+ */
+const VALIDATOR_VERIFY = "0xaf375463";
+
+async function validatorVerdict(
+  client: { call: (a: { to: Address; data: Hex }) => Promise<{ data?: Hex }> },
+  validator: Address,
+  subject: Address,
+  party: Address,
+): Promise<boolean> {
+  const args = encodeAbiParameters(parseAbiParameters("address, address"), [subject, party]);
+  const res = await client.call({ to: validator, data: `${VALIDATOR_VERIFY}${args.slice(2)}` as Hex });
+  if (!res.data || res.data.length < 66) return false;
+  return BigInt(res.data) === 1n;
+}
+
+/** A revert from a Cleanverse contract, said plainly. Fail-closed is the point. */
 function revertProse(e: unknown, subject: string) {
   const sel = revertSelector(e);
   const what = sel
@@ -18,8 +39,10 @@ function revertProse(e: unknown, subject: string) {
 
 export type GateStatus = "idle" | "running" | "pass" | "deny" | "skip";
 
+export type GateId = "sender" | "recipient" | "asset" | "protocolFrom" | "protocolTo";
+
 export type Gate = {
-  id: "sender" | "recipient" | "asset" | "protocol";
+  id: GateId;
   index: string;
   title: string;
   claim: string;
@@ -65,12 +88,20 @@ const BASE: Omit<Gate, "status">[] = [
     call: "CleanversePolicy.canTransfer(aUSDC, from, to, amount)",
   },
   {
-    id: "protocol",
+    id: "protocolFrom",
     index: "04",
-    title: "Protocol policy",
+    title: "Protocol policy — sender",
     claim:
-      "If Standing Protocol is registered as a policy subject, its own rule set permits it too.",
-    call: "CleanversePolicy.canTransfer(CreditManager, from, to, amount)",
+      "Standing Protocol carries its own rule set at Cleanverse's validator, and that rule set admits the sending party.",
+    call: "Validator.0xaf375463(CreditManager, from)",
+  },
+  {
+    id: "protocolTo",
+    index: "05",
+    title: "Protocol policy — recipient",
+    claim:
+      "The same rule set is asked about the receiving party separately. Each refusal names the party it was asked about.",
+    call: "Validator.0xaf375463(CreditManager, to)",
   },
 ];
 
@@ -88,6 +119,7 @@ export function useGateSequence(
   to: Address | undefined,
   amount: bigint,
 ) {
+  const { key: networkKey, contracts } = useNetwork();
   const [gates, setGates] = useState<Gate[]>(() =>
     BASE.map((g) => ({ ...g, status: "idle" as GateStatus })),
   );
@@ -95,7 +127,7 @@ export function useGateSequence(
   const [evaluatedAt, setEvaluatedAt] = useState<bigint | null>(null);
   const runId = useRef(0);
 
-  const patch = useCallback((id: Gate["id"], next: Partial<Gate>, mine: number) => {
+  const patch = useCallback((id: GateId, next: Partial<Gate>, mine: number) => {
     if (mine !== runId.current) return;
     setGates((prev) => prev.map((g) => (g.id === id ? { ...g, ...next } : g)));
   }, []);
@@ -109,6 +141,7 @@ export function useGateSequence(
     }
 
     const mine = ++runId.current;
+    const publicClient = publicClientFor(networkKey);
     setGates(BASE.map((g) => ({ ...g, status: "idle" as GateStatus })));
     setVerdict({ kind: "running" });
     setEvaluatedAt(null);
@@ -126,7 +159,7 @@ export function useGateSequence(
         patch(id, { status: "running" }, mine);
         const started = Date.now();
         const [ok, code] = (await publicClient.readContract({
-          address: CONTRACTS.creditManager,
+          address: contracts.creditManager,
           abi: creditManagerAbi,
           functionName: "checkParty",
           args: [party],
@@ -158,10 +191,10 @@ export function useGateSequence(
           "the policy engine refused. A refusal here is final — the asset carries its rules with it.";
         try {
           const ok = (await publicClient.readContract({
-            address: CONTRACTS.policy,
+            address: contracts.policy,
             abi: cleanversePolicyAbi,
             functionName: "canTransfer",
-            args: [CONTRACTS.verifiedAsset, from, to, amount],
+            args: [contracts.verifiedAsset, from, to, amount],
           })) as boolean;
           status = ok ? "pass" : "deny";
           ret = String(ok);
@@ -180,62 +213,71 @@ export function useGateSequence(
         if (mine !== runId.current) return;
       }
 
-      // ---- 04 — the protocol's own rules, if it has any -------------------
-      patch("protocol", { status: "running" }, mine);
-      {
-        const started = Date.now();
-        let registered = false;
-        try {
-          registered = (await publicClient.readContract({
-            address: CONTRACTS.policy,
-            abi: cleanversePolicyAbi,
-            functionName: "isTokenRegistered",
-            args: [CONTRACTS.creditManager],
-          })) as boolean;
-        } catch {
-          registered = false;
-        }
+      // ---- 04 / 05 — the protocol's own rule set, asked party by party ----
+      let isRegistered = false;
+      try {
+        isRegistered = (await publicClient.readContract({
+          address: contracts.creditManager,
+          abi: complianceGateAbi,
+          functionName: "isProtocolRegistered",
+        })) as boolean;
+      } catch {
+        isRegistered = false;
+      }
+      if (mine !== runId.current) return;
 
-        if (!registered) {
+      for (const [id, party, label] of [
+        ["protocolFrom", from, "from"],
+        ["protocolTo", to, "to"],
+      ] as const) {
+        patch(id, { status: "running" }, mine);
+        const started = Date.now();
+
+        if (!isRegistered) {
           await sleep(Math.max(0, DWELL - (Date.now() - started)));
           patch(
-            "protocol",
+            id,
             {
               status: "skip",
-              ret: "isTokenRegistered = false",
+              ret: "isProtocolRegistered = false",
+              party,
               detail:
-                "Standing Protocol is not currently registered as a policy subject, so it carries no rule set of its own and this condition does not apply. Registering it is an off-chain administrative act; the contracts enforce the asset's rules either way.",
+                "Standing Protocol is not registered with Cleanverse's validator at this block, so it carries no rule set of its own and this condition does not apply. Registration is an off-chain administrative act; the contracts enforce the asset's rules either way.",
             },
             mine,
           );
-        } else {
-          let status: GateStatus = "deny";
-          let ret = "false";
-          let detail = "the protocol's own rule set refused this movement.";
-          try {
-            const ok = (await publicClient.readContract({
-              address: CONTRACTS.policy,
-              abi: cleanversePolicyAbi,
-              functionName: "canTransfer",
-              args: [CONTRACTS.creditManager, from, to, amount],
-            })) as boolean;
-            status = ok ? "pass" : "deny";
-            ret = String(ok);
-            if (ok) detail = "the protocol's own rule set permits this movement.";
-          } catch (e) {
-            status = "deny";
-            ret = "revert";
-            detail = revertProse(e, "the policy engine");
-          }
-          await sleep(Math.max(0, DWELL - (Date.now() - started)));
-          patch("protocol", { status, ret, detail, code: status === "deny" ? 5 : 0 }, mine);
+          if (mine !== runId.current) return;
+          continue;
         }
+
+        let status: GateStatus = "deny";
+        let ret = "0";
+        let detail = `${label} = ${truncateMid(party, 8, 6)} — the protocol's own rule set refused this party.`;
+        try {
+          const ok = await validatorVerdict(
+            publicClient,
+            contracts.validator,
+            contracts.creditManager,
+            party,
+          );
+          status = ok ? "pass" : "deny";
+          ret = ok ? "1" : "0";
+          if (ok) {
+            detail = `${label} = ${truncateMid(party, 8, 6)} — admitted by the protocol's registered rule set.`;
+          }
+        } catch (e) {
+          status = "deny";
+          ret = "revert";
+          detail = revertProse(e, "the validator");
+        }
+        await sleep(Math.max(0, DWELL - (Date.now() - started)));
+        patch(id, { status, ret, detail, party, code: status === "deny" ? 5 : 0 }, mine);
         if (mine !== runId.current) return;
       }
 
       // ---- the contract's own composite answer ---------------------------
       const [allowed, code, party] = (await publicClient.readContract({
-        address: CONTRACTS.creditManager,
+        address: contracts.creditManager,
         abi: creditManagerAbi,
         functionName: "checkTransferDetailed",
         args: [from, to, amount],
@@ -246,7 +288,7 @@ export function useGateSequence(
       if (mine !== runId.current) return;
       setVerdict({ kind: "fault", message: shortError(e) });
     }
-  }, [from, to, amount, patch]);
+  }, [from, to, amount, patch, networkKey, contracts]);
 
   // Re-evaluate on any change to the transfer being tested.
   useEffect(() => {

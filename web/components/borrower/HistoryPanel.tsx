@@ -1,17 +1,24 @@
 "use client";
 
-import type { Hex } from "viem";
+import type { Address, Hex } from "viem";
 import { Addr, Amount, Empty, Fault, Note, Panel, Row, Stamp, Tag } from "../primitives";
-import { MIN_QUALIFYING_HOLD } from "@/lib/contracts";
-import { useHistory, useWallets } from "@/lib/reads";
+import { MIN_QUALIFYING_HOLD, SCORING } from "@/lib/contracts";
+import { useHistory, useWalletDefaults, useWallets } from "@/lib/reads";
 
 /**
  * The registry record. Keyed to the identity behind the credential rather than to
  * the wallet, which is the whole reason a default is worth anything as security.
  */
-export function HistoryPanel({ kycHash }: { kycHash: Hex | undefined }) {
+export function HistoryPanel({
+  kycHash,
+  subject,
+}: {
+  kycHash: Hex | undefined;
+  subject: Address | undefined;
+}) {
   const history = useHistory(kycHash);
   const wallets = useWallets(kycHash);
+  const walletDefaults = useWalletDefaults(subject);
 
   if (!kycHash) {
     return (
@@ -106,6 +113,41 @@ export function HistoryPanel({ kycHash }: { kycHash: Hex | undefined }) {
                 <span className="num text-[var(--color-bone-ghost)]">never</span>
               )}
             </Row>
+          </div>
+
+          <div className="border-t border-[var(--color-line)] px-4 py-1">
+            <Row
+              label="Write-offs against this wallet"
+              note="StandingRegistry.walletDefaults(wallet)"
+            >
+              {walletDefaults.error ? (
+                <Tag tone="deny">RPC FAULT</Tag>
+              ) : walletDefaults.data === undefined ? (
+                <span className="num text-[var(--color-bone-ghost)] sp-pulse">······</span>
+              ) : (
+                <span
+                  className={`num text-[1.0625rem] ${
+                    walletDefaults.data > 0
+                      ? "text-[var(--color-refuse)]"
+                      : "text-[var(--color-bone-ghost)]"
+                  }`}
+                >
+                  {walletDefaults.data}
+                </span>
+              )}
+            </Row>
+            <div className="py-2.5">
+              <Note>
+                A write-off is recorded twice — once against the identity above and once against the
+                wallet that drew the loan. The score subtracts{" "}
+                <span className="num">
+                  max(identity, wallet) × {SCORING.DEFAULT_PENALTY}
+                </span>
+                , never the sum, so it is paid for once and cannot be escaped by leaving either
+                record behind. Re-verifying under a fresh KYC hash does not clear it: the wallet
+                still carries its own count.
+              </Note>
+            </div>
           </div>
 
           <div className="border-t border-[var(--color-line)] p-4">

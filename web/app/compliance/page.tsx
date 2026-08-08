@@ -5,13 +5,14 @@ import { getAddress, type Address } from "viem";
 import { useSubject } from "@/lib/subject";
 import {
   ASSET_SYMBOL,
-  CONTRACTS,
   REFERENCE_WALLETS,
   REFUSAL,
   REFUSAL_PROSE,
 } from "@/lib/contracts";
+import { useNetwork } from "@/lib/network";
+import { useValidatorRegistered } from "@/lib/reads";
 import { isAddressish, parseUnits6, truncateMid } from "@/lib/format";
-import { Panel, Tag } from "@/components/primitives";
+import { Addr, Panel, Tag } from "@/components/primitives";
 import { ScreenHead } from "@/components/ScreenHead";
 import { GateStack } from "@/components/compliance/GateStack";
 import { PoolCredential } from "@/components/compliance/PoolCredential";
@@ -19,8 +20,9 @@ import { useGateSequence } from "@/components/compliance/useGateSequence";
 
 export default function ComplianceScreen() {
   const { subject } = useSubject();
+  const { contracts } = useNetwork();
 
-  const [fromRaw, setFromRaw] = useState<string>(CONTRACTS.standingPool);
+  const [fromRaw, setFromRaw] = useState<string>(contracts.standingPool);
   const [toRaw, setToRaw] = useState<string>("");
   const [amountInput, setAmountInput] = useState("1000");
 
@@ -30,11 +32,21 @@ export default function ComplianceScreen() {
     if (!toTouched && subject) setToRaw(subject);
   }, [subject, toTouched]);
 
+  // The sending party defaults to the pool, and the pool moves with the deployment.
+  const [fromTouched, setFromTouched] = useState(false);
+  useEffect(() => {
+    if (!fromTouched) setFromRaw(contracts.standingPool);
+  }, [contracts.standingPool, fromTouched]);
+
   const from = useMemo(() => safeAddress(fromRaw), [fromRaw]);
   const to = useMemo(() => safeAddress(toRaw), [toRaw]);
   const amount = parseUnits6(amountInput) ?? 0n;
 
   const { gates, verdict, evaluatedAt, rerun } = useGateSequence(from, to, amount);
+
+  // Read straight off the validator so the panel below states the registration
+  // whether or not a transfer is currently under test.
+  const registered = useValidatorRegistered(contracts.creditManager);
 
   const firstDenyIndex = gates.findIndex((g) => g.status === "deny");
 
@@ -42,14 +54,14 @@ export default function ComplianceScreen() {
     {
       label: "Disbursement",
       note: "pool → borrower",
-      from: CONTRACTS.standingPool,
+      from: contracts.standingPool,
       to: subject ?? REFERENCE_WALLETS[0].address,
     },
     {
       label: "Repayment",
       note: "borrower → pool",
       from: subject ?? REFERENCE_WALLETS[0].address,
-      to: CONTRACTS.standingPool,
+      to: contracts.standingPool,
     },
     {
       label: "Peer transfer",
@@ -99,7 +111,10 @@ export default function ComplianceScreen() {
                 id="from"
                 label="From — sending party"
                 value={fromRaw}
-                onChange={(v) => setFromRaw(v)}
+                onChange={(v) => {
+                  setFromTouched(true);
+                  setFromRaw(v);
+                }}
               />
               <Party
                 id="to"
@@ -142,6 +157,7 @@ export default function ComplianceScreen() {
                     className={`btn !px-2.5 !py-1 ${active ? "btn-key" : ""}`}
                     title={p.note}
                     onClick={() => {
+                      setFromTouched(true);
                       setFromRaw(p.from);
                       setToTouched(true);
                       setToRaw(p.to ?? "");
@@ -166,6 +182,46 @@ export default function ComplianceScreen() {
             </div>
             <GateStack gates={gates} verdict={verdict} firstDenyIndex={firstDenyIndex} />
           </div>
+
+          {/* ---- what conditions 04 and 05 are actually for --------------- */}
+          <Panel
+            label="Rule change, observed"
+            sub="conditions 04 and 05 · the validator's rule set"
+            right={
+              registered.error ? (
+                <Tag tone="deny">RPC FAULT</Tag>
+              ) : registered.data === undefined ? (
+                <Tag tone="idle">READING</Tag>
+              ) : registered.data ? (
+                <Tag tone="pass">REGISTERED</Tag>
+              ) : (
+                <Tag tone="idle">NOT REGISTERED</Tag>
+              )
+            }
+          >
+            <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-[var(--color-line)] pb-3">
+              <span className="lbl">Validator · isRegistered(CreditManager)</span>
+              <Addr address={contracts.validator} head={12} tail={10} tone="dim" />
+            </div>
+            <p className="mt-3 max-w-[86ch] text-[0.8125rem] leading-relaxed text-[var(--color-bone-dim)]">
+              Registering the protocol with Cleanverse&apos;s validator binds a rule set to its
+              address — <span className="num">min_tier</span>,{" "}
+              <span className="num">min_sub_tier</span>,{" "}
+              <span className="num">allowed_group</span>, jurisdiction, blacklist. Conditions 04 and
+              05 above are that rule set being read, once for each counterparty.
+            </p>
+            <p className="mt-2.5 max-w-[86ch] text-[0.8125rem] leading-relaxed text-[var(--color-bone-dim)]">
+              It was tested rather than assumed. With the protocol registered, the validator&apos;s
+              verdict for a tier-50 wallet was{" "}
+              <span className="num text-[var(--color-teal)]">1</span>. Raising{" "}
+              <span className="num">min_tier</span> to 60 through Cleanverse&apos;s REST API changed
+              the same on-chain call to{" "}
+              <span className="num text-[var(--color-refuse)]">0</span> in the next block; setting it
+              back to 0 returned it to <span className="num text-[var(--color-teal)]">1</span>. No
+              redeploy, no upgrade, no change to the contracts. The rule is back at 0, which is why
+              the conditions above pass for a credentialled wallet.
+            </p>
+          </Panel>
         </div>
 
         {/* ---- the codebook ---------------------------------------------- */}

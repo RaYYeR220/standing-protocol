@@ -6,9 +6,9 @@ import { ScreenHead } from "@/components/ScreenHead";
 import { Addr, Amount, Empty, Fault, Hash, Note, Panel, Tag } from "@/components/primitives";
 import { useLoanBook } from "@/components/book/useLoanBook";
 import { creditManagerAbi } from "@/lib/abi";
-import { explorerTx } from "@/lib/chain";
-import { CONTRACTS, GRACE_PERIOD_SECONDS, LOAN_STATUS } from "@/lib/contracts";
+import { GRACE_PERIOD_SECONDS, LOAN_STATUS } from "@/lib/contracts";
 import { bpsToPercent, formatTimestamp, relativeTime, shortError } from "@/lib/format";
+import { useNetwork } from "@/lib/network";
 import { useSubject } from "@/lib/subject";
 import type { LoanRow } from "@/lib/types";
 
@@ -166,8 +166,10 @@ export default function LoanBookScreen() {
 }
 
 function BookRow({ row, onDone }: { row: LoanRow; onDone: () => void }) {
+  const { contracts, chainId, txUrl } = useNetwork();
   const mark = useWriteContract();
   const rc = useWaitForTransactionReceipt({
+    chainId,
     hash: mark.data,
     query: { enabled: Boolean(mark.data) },
   });
@@ -225,7 +227,8 @@ function BookRow({ row, onDone }: { row: LoanRow; onDone: () => void }) {
               disabled={mark.isPending || rc.isLoading}
               onClick={() =>
                 mark.writeContract({
-                  address: CONTRACTS.creditManager,
+                  chainId,
+                  address: contracts.creditManager,
                   abi: creditManagerAbi,
                   functionName: "markDefault",
                   args: [BigInt(row.id)],
@@ -245,7 +248,7 @@ function BookRow({ row, onDone }: { row: LoanRow; onDone: () => void }) {
             ) : null}
             {mark.data ? (
               <a
-                href={explorerTx(mark.data)}
+                href={txUrl(mark.data)}
                 target="_blank"
                 rel="noreferrer"
                 className="num text-[0.625rem] text-[var(--color-teal)]"

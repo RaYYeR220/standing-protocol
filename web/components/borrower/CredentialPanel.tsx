@@ -2,9 +2,10 @@
 
 import type { Address } from "viem";
 import { Amount, Addr, Bar, Empty, Fault, Hash, Note, Panel, Row, Stamp, Tag } from "../primitives";
-import { APASS_STATUS, CONTRACTS, ZERO_HASH } from "@/lib/contracts";
+import { APASS_STATUS, SCORING, tierBand, ZERO_HASH } from "@/lib/contracts";
+import { useNetwork } from "@/lib/network";
 import { truncateMid } from "@/lib/format";
-import { useAssetBalance, useCanonicalIdentity, useCredential } from "@/lib/reads";
+import { useAssetBalance, useCanonicalIdentity, useCredential, useSupersedes } from "@/lib/reads";
 
 /**
  * The A-Pass, read straight off the registry through CreditManager.credentialOf.
@@ -14,9 +15,10 @@ import { useAssetBalance, useCanonicalIdentity, useCredential } from "@/lib/read
 export function CredentialPanel({ subject }: { subject: Address }) {
   const cred = useCredential(subject);
   const balance = useAssetBalance(subject);
-  const canonical = useCanonicalIdentity(
-    cred.data?.kycHash && cred.data.kycHash !== ZERO_HASH ? cred.data.kycHash : undefined,
-  );
+  const kycHash =
+    cred.data?.kycHash && cred.data.kycHash !== ZERO_HASH ? cred.data.kycHash : undefined;
+  const canonical = useCanonicalIdentity(kycHash);
+  const superseded = useSupersedes(kycHash);
 
   const c = cred.data;
   const nowSec = Math.floor(Date.now() / 1000);
@@ -103,6 +105,12 @@ export function CredentialPanel({ subject }: { subject: Address }) {
                   <span className="lbl">Supersedes</span>
                   <Hash value={c.previousKycHash} head={18} tail={12} />
                 </div>
+                {superseded.data && superseded.data !== ZERO_HASH ? (
+                  <div className="mt-1.5 flex flex-wrap items-baseline justify-between gap-2">
+                    <span className="lbl">Registry lineage</span>
+                    <Hash value={superseded.data} head={18} tail={12} />
+                  </div>
+                ) : null}
                 <Note>
                   This credential replaced an earlier one. The registry unions the two hashes into a
                   single identity record, so re-verifying does not shed a default.
@@ -127,9 +135,12 @@ export function CredentialPanel({ subject }: { subject: Address }) {
                 <Amount value={balance.data} />
               )}
             </Row>
-            <Row label="Tier weight" note="tier × 300 / 99 in the identity component">
+            <Row
+              label="Tier weight"
+              note={`banded, not pro-rata — ${tierBand(c.tier)?.points ?? 0} of ${SCORING.TIER_MAX} identity points`}
+            >
               <div className="w-32">
-                <Bar value={c.tier} max={99} />
+                <Bar value={tierBand(c.tier)?.points ?? 0} max={SCORING.TIER_MAX} />
               </div>
             </Row>
           </div>
@@ -140,6 +151,7 @@ export function CredentialPanel({ subject }: { subject: Address }) {
 }
 
 function NoCredential({ subject }: { subject: Address }) {
+  const { contracts } = useNetwork();
   return (
     <div className="p-4">
       <div className="border border-[var(--color-refuse-deep)] bg-[var(--color-refuse-wash)] p-5">
@@ -160,7 +172,7 @@ function NoCredential({ subject }: { subject: Address }) {
         </p>
         <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-[var(--color-refuse-deep)] pt-3">
           <span className="lbl">Registry</span>
-          <Addr address={CONTRACTS.apassRegistry} tone="dim" head={10} tail={8} />
+          <Addr address={contracts.apassRegistry} tone="dim" head={10} tail={8} />
           <span className="lbl">Subject</span>
           <Addr address={subject} tone="refuse" head={10} tail={8} />
         </div>
