@@ -22,14 +22,19 @@ that evidence goes. If something is not on this list, we are not claiming it.
 | The compliance verdict is a public view, `canTransfer(token, from, to, amount)` | REPRODUCIBLE | inspection script prints an allow, and two refusals |
 | The policy engine checks **both** ends and *reverts* (custom error `0xa6725971(address)`) on an uncredentialed party | VERIFIED-LIVE | inspection script, last two cases |
 | Argument order of `canTransfer` is `(token, from, to, amount)` | VERIFIED-LIVE | the `(from, to, token, amount)` permutation reverts; established by trying both |
-| `/validator/register` binds a rule set to *our* contract, and the owner signature is `personal_sign("monad" + lowercase(address))` | VERIFIED-LIVE | the API accepts our signature — it fails past signature validation on a relayer gas error, not on the signature. See "Known gaps" |
+| `/validator/register` binds a rule set to *our* contract, and the owner signature is `personal_sign(chain + lowercase(address))` | VERIFIED-LIVE | the pool and manager are registered on both chains; `validator.isRegistered(pool)` returns true |
+| Rules for a registered contract live on a **separate validator contract**, not on the token policy | VERIFIED-LIVE | `policy.isTokenRegistered(pool)` is false while `validator.isRegistered(pool)` is true — `docs/CLEANVERSE.md` §2 |
+| An operator can tighten the protocol's rule set through the API and the on-chain verdict changes in the next block, with no redeploy | REPRODUCIBLE | `PROOF.md` — `min_tier` 0 → 60 flipped the verdict 1 → 0 for a tier-50 wallet, then back |
 | The protocol reads identity and compliance from chain state, never from an API | REPRODUCIBLE | `src/` contains no oracle, no signer, no off-chain input of any kind |
 
 ## The protocol
 
 | Claim | Tier | Evidence |
 |---|---|---|
-| A verified lender can supply, a verified borrower can draw under-collateralized, repay, and have standing rise | REPRODUCIBLE | `forge script script/Demo.s.sol --rpc-url https://testnet-rpc.monad.xyz -vv` — full walkthrough on a fork against the live Cleanverse contracts |
+| A verified lender can supply, a verified borrower can draw under-collateralized, and repay — **on a live chain** | VERIFIED-LIVE | `PROOF.md` — 3.000000 aUSDC drawn against 2.365800 collateral (78.86%) on Base Sepolia, then repaid |
+| The same, plus a default, end to end | REPRODUCIBLE | `forge script script/Demo.s.sol --rpc-url https://testnet-rpc.monad.xyz -vv` — on a fork against the live Cleanverse contracts |
+| The protocol contracts hold their own A-Pass and are registered policy subjects | VERIFIED-LIVE | `checkParty(pool)` → `(true, 0)`, `isProtocolRegistered()` → `true`, on both chains |
+| The integration is chain-agnostic | VERIFIED-LIVE | identical source deployed and working on Monad testnet and Base Sepolia |
 | Every approved loan is under-collateralized | REPRODUCIBLE | demo prints the ratio; the terms curve tops out at 80% collateral. Unit tests sweep the curve |
 | A wallet with no credential is refused, and the refusal names the failing party and condition | REPRODUCIBLE | demo step 3; `checkTransferDetailed` on the live deployment |
 | A draw above the protocol ceiling, above the borrower's line, or by an uncredentialed wallet reverts | REPRODUCIBLE | demo step 3, cases b/c/d |
@@ -72,17 +77,26 @@ deterministic and offline; the fork suite and the demo use the real deployments.
 
 Things that do not work, stated plainly.
 
-- **The pool has no A-Pass on the live testnet deployment, so the live deployment refuses
-  everything.** This is correct fail-closed behaviour, not a bug, but it means the on-chain
-  walkthrough is currently only reproducible on a fork. It is blocked on Cleanverse's credential
-  endpoint, which we have reported and are retrying.
-- **`/validator/register` fails with `12026 intrinsic gas greater than limit`** on Cleanverse's
-  relayer, so our contracts are not registered as policy subjects and the fourth gate condition
-  (`ProtocolPolicyDenied`) is unexercised on the live deployment. Other teams reported the same error
-  on the same endpoints. The gate is written to work either way and the path is tested against a
-  mock.
-- **The origin-USDC → aUSDC wrap did not complete.** We sent USDC to the deposit addresses returned
-  by `/query_deposit_address`; it is sitting there on-chain and no aUSDC was minted.
+- **Monad's pool is empty, so the live loan is on Base Sepolia.** Cleanverse's USDC faucet on Monad
+  returned `failed to execute token transfer` for the whole build window, while the same call on
+  `base` worked. The contracts are deployed, credentialed and registered on both chains and the gate
+  is live on both; there is simply nothing to lend on Monad.
+- **No live default.** A write-off needs a matured loan plus a three-day grace period. It is
+  demonstrated on a fork with compressed time instead, against the real contracts.
+- **Two laundering routes survive, and need a keeper.** A defaulter who re-verifies twice *and*
+  moves to a fresh wallet sheds the identity chain, because a credential carries only one previous
+  hash and the intermediate link is never recorded. The same trick doubles a credit line. Both close
+  completely if anyone calls the permissionless `syncIdentity(address)` once while the intermediate
+  credential is live — which is a keeper's job, and is why that function takes no permissions. The
+  common case (same wallet) is already closed by the wallet-sticky default flag.
+- **A validator outage silently relaxes a tightened rule set.** An unreachable *registration check*
+  falls back to "unregistered" so a Cleanverse outage cannot brick a protocol that has no rules —
+  but an operator who has raised `min_tier` loses that tightening while the validator is down. The
+  verdict itself still fails closed. `isProtocolRegistered()` is public so this is monitorable, and
+  it should be monitored.
+- **Fee-on-transfer assets are not supported.** `repay` pulls `principal + interest` to the manager
+  and the pool then pulls the same number; an asset that took a fee would have the pool make up the
+  difference out of collateral. aUSDC does not.
 
 ## Not claimed
 
@@ -129,5 +143,19 @@ Found and fixed:
 - The asset component of the score saturated at ten dollars, making a $10 holder and a $10M holder
   indistinguishable.
 
-Each of those has a regression test named after it. The two we chose to document rather than fix —
-mis-issuance and donation sensitivity — are in "Not claimed" above.
+Then, on a second and third adversarial pass over the fixes themselves:
+
+- A defaulter could still launder their record by re-verifying **twice**, because the link between
+  credentials was only written inside a draw, and a refused draw reverted it away.
+- Migrating an identity re-parented the aggregate but not each loan's own key, so `repay` and
+  `markDefault` both underflowed — leaving loans that could neither be repaid nor written off, and
+  reachable by nothing more sinister than a sibling wallet borrowing.
+- The first link won, so a borrower holding two lineages could commit the clean one and strand the
+  write-off on a hash nothing resolved to again.
+- The reentrancy guards were on the wrong side of the boundary: the pool was not on the stack during
+  the windows they were meant to cover, so all three mid-transfer windows stayed open.
+- A verdict word from the validator that was neither 0 nor 1 reverted the gate instead of denying,
+  which would have made the protocol uncallable rather than strict.
+
+Each of those has a regression test named after it. What we chose to document rather than fix —
+mis-issuance, donation sensitivity, and the two keeper-closable laundering routes — is above.
