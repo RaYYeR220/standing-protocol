@@ -13,9 +13,9 @@ import {StandingRegistry} from "../StandingRegistry.sol";
 ///      credential, this protocol's own repayment record, and the borrower's verified asset balance
 ///      — and the arithmetic is fixed. Two callers on the same block get the same number.
 ///
-///      The protocol does run a language model over the same inputs, but only to write the
-///      explanation a lender reads. It has no path to the number, and the number is what the
-///      contract enforces.
+///      The breakdown is returned in full precisely so the explanation a borrower reads can be
+///      rendered from the same numbers the contract enforced, rather than narrated separately. No
+///      model sits anywhere in this path.
 library StandingMath {
     uint256 internal constant MAX_SCORE = 1000;
 
@@ -40,10 +40,12 @@ library StandingMath {
     uint256 internal constant VOLUME_CAP = 10;
     uint256 internal constant DEFAULT_PENALTY = 250;
 
-    /// @dev Asset sub-weights. Denominated in the verified asset's smallest unit (aUSDC has 6dp).
+    /// @dev Asset thresholds, in the verified asset's smallest unit (aUSDC has 6 decimals).
+    ///      Deliberately logarithmic. A linear scale either saturates at a trivial balance — making
+    ///      a ten-dollar holder indistinguishable from a ten-million-dollar one — or ignores small
+    ///      borrowers entirely. Each step up is an order of magnitude, which is roughly how much
+    ///      more a balance has to mean before it should move an underwriting decision.
     uint256 internal constant ASSET_UNIT = 1e6;
-    uint256 internal constant ASSET_POINTS = 25;
-    uint256 internal constant ASSET_CAP = 10;
 
     /// @dev Term curve bounds. Collateral required falls to zero as standing rises; even the
     ///      weakest accepted borrower posts less than the loan is worth, so every approved loan is
@@ -114,9 +116,7 @@ library StandingMath {
 
         // Assets — verified, compliantly-originated holdings. Unverified wealth counts for nothing
         // here, which is the point: the balance is evidence only because of where it came from.
-        uint256 assetUnits = verifiedBalance / ASSET_UNIT;
-        if (assetUnits > ASSET_CAP) assetUnits = ASSET_CAP;
-        b.assetPoints = assetUnits * ASSET_POINTS;
+        b.assetPoints = _assetPoints(verifiedBalance);
         b.assetSubtotal = _cap(b.assetPoints, ASSETS_MAX);
 
         uint256 gross = b.identitySubtotal + b.historySubtotal + b.assetSubtotal;
@@ -146,6 +146,17 @@ library StandingMath {
 
         // Rate falls from 25% to 5%.
         t.aprBps = MAX_APR_BPS - (((MAX_APR_BPS - MIN_APR_BPS) * above) / span);
+    }
+
+    /// @notice Points awarded for a verified-asset balance, on a base-10 ladder.
+    function _assetPoints(uint256 balance) internal pure returns (uint256) {
+        if (balance >= 100_000 * ASSET_UNIT) return 250;
+        if (balance >= 10_000 * ASSET_UNIT) return 200;
+        if (balance >= 1_000 * ASSET_UNIT) return 150;
+        if (balance >= 100 * ASSET_UNIT) return 100;
+        if (balance >= 10 * ASSET_UNIT) return 50;
+        if (balance >= ASSET_UNIT) return 20;
+        return 0;
     }
 
     function _cap(uint256 v, uint256 max) private pure returns (uint256) {

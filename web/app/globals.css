@@ -1,0 +1,435 @@
+@import "tailwindcss";
+
+/* ==========================================================================
+   Standing Protocol — underwriting terminal
+   Dark ink base. One accent (verified teal). Refusals warm red. Nothing else
+   carries colour: colour here is a verdict, not decoration.
+   ========================================================================== */
+
+@theme {
+  --color-ink: #0a0d12;
+  --color-ink-deep: #06080c;
+  --color-panel: #111721;
+  --color-panel-sunk: #0c1119;
+  --color-panel-lift: #161e2a;
+
+  --color-line: #1c2531;
+  --color-line-lift: #263243;
+  --color-line-hot: #38485c;
+
+  --color-bone: #e9e7e2;
+  --color-bone-dim: #8d95a0;
+  --color-bone-faint: #565e69;
+  --color-bone-ghost: #333b45;
+
+  --color-teal: #2fd4c8;
+  --color-teal-deep: #14807a;
+  --color-teal-wash: #0e2a2c;
+
+  --color-refuse: #ff6b5a;
+  --color-refuse-deep: #8e2e26;
+  --color-refuse-wash: #2a1210;
+
+  --font-sans: var(--font-archivo), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+
+  --text-micro: 0.5625rem; /* 9px  — rail labels */
+  --text-tag: 0.625rem; /* 10px — field labels */
+  --text-xs2: 0.6875rem; /* 11px — dense table body */
+}
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+    border-color: var(--color-line);
+  }
+
+  html {
+    background-color: var(--color-ink-deep);
+    color-scheme: dark;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--color-ink);
+    color: var(--color-bone);
+    font-family: var(--font-sans);
+    font-size: 0.8125rem;
+    line-height: 1.45;
+    overflow-x: hidden;
+  }
+
+  /* The ledger grid. Faint enough to read as paper texture, present enough
+     that every panel sits on a measured surface. */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background-image:
+      linear-gradient(to right, rgba(255, 255, 255, 0.016) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.016) 1px, transparent 1px);
+    background-size: 34px 34px;
+    mask-image: radial-gradient(ellipse 130% 90% at 50% 0%, #000 30%, transparent 100%);
+  }
+
+  ::selection {
+    background: var(--color-teal);
+    color: var(--color-ink-deep);
+  }
+
+  input,
+  button,
+  select,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
+
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type="number"] {
+    -moz-appearance: textfield;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--color-ink-deep);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-line-lift);
+    border: 2px solid var(--color-ink-deep);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-line-hot);
+  }
+
+  :focus-visible {
+    outline: 1px solid var(--color-teal);
+    outline-offset: 1px;
+  }
+}
+
+@layer components {
+  /* ---- type roles ------------------------------------------------------ */
+
+  /* Every label in the terminal. Small, wide, quiet. */
+  .lbl {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    line-height: 1;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--color-bone-faint);
+  }
+
+  .lbl-micro {
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+    line-height: 1;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--color-bone-faint);
+  }
+
+  /* Numbers are the product. Tabular, tight, bone-white. */
+  .num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1, "zero" 1;
+    letter-spacing: -0.01em;
+    color: var(--color-bone);
+  }
+
+  .hdg {
+    font-family: var(--font-sans);
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+
+  /* ---- panel ----------------------------------------------------------- */
+
+  .panel {
+    position: relative;
+    background: var(--color-panel);
+    border: 1px solid var(--color-line);
+  }
+
+  /* Corner ticks: instrument framing, no radii anywhere. */
+  .panel::before,
+  .panel::after {
+    content: "";
+    position: absolute;
+    width: 5px;
+    height: 5px;
+    pointer-events: none;
+    border-color: var(--color-line-hot);
+  }
+  .panel::before {
+    top: -1px;
+    left: -1px;
+    border-top: 1px solid;
+    border-left: 1px solid;
+  }
+  .panel::after {
+    bottom: -1px;
+    right: -1px;
+    border-bottom: 1px solid;
+    border-right: 1px solid;
+  }
+
+  .panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.5rem 0.875rem;
+    border-bottom: 1px solid var(--color-line);
+    background: var(--color-panel-sunk);
+    min-height: 2rem;
+  }
+
+  /* ---- controls -------------------------------------------------------- */
+
+  .field {
+    width: 100%;
+    background: var(--color-panel-sunk);
+    border: 1px solid var(--color-line-lift);
+    padding: 0.5rem 0.625rem;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.8125rem;
+    color: var(--color-bone);
+    transition: border-color 120ms linear, background-color 120ms linear;
+  }
+  .field::placeholder {
+    color: var(--color-bone-ghost);
+  }
+  .field:hover:not(:disabled) {
+    border-color: var(--color-line-hot);
+  }
+  .field:focus {
+    outline: none;
+    border-color: var(--color-teal);
+    background: var(--color-ink-deep);
+  }
+  .field:disabled {
+    opacity: 0.5;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.875rem;
+    border: 1px solid var(--color-line-lift);
+    background: var(--color-panel-lift);
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--color-bone);
+    cursor: pointer;
+    transition: border-color 110ms linear, background-color 110ms linear,
+      color 110ms linear;
+  }
+  .btn:hover:not(:disabled) {
+    border-color: var(--color-line-hot);
+    background: #1c2634;
+  }
+  .btn:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+  .btn:disabled {
+    opacity: 0.38;
+    cursor: not-allowed;
+  }
+
+  .btn-key {
+    border-color: var(--color-teal-deep);
+    background: var(--color-teal-wash);
+    color: var(--color-teal);
+  }
+  .btn-key:hover:not(:disabled) {
+    background: #12383a;
+    border-color: var(--color-teal);
+  }
+
+  .btn-refuse {
+    border-color: var(--color-refuse-deep);
+    background: var(--color-refuse-wash);
+    color: var(--color-refuse);
+  }
+  .btn-refuse:hover:not(:disabled) {
+    background: #381814;
+    border-color: var(--color-refuse);
+  }
+
+  /* ---- verdict chips --------------------------------------------------- */
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.1875rem 0.4375rem;
+    border: 1px solid;
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .chip-pass {
+    border-color: var(--color-teal-deep);
+    color: var(--color-teal);
+    background: var(--color-teal-wash);
+  }
+  .chip-deny {
+    border-color: var(--color-refuse-deep);
+    color: var(--color-refuse);
+    background: var(--color-refuse-wash);
+  }
+  .chip-idle {
+    border-color: var(--color-line-lift);
+    color: var(--color-bone-faint);
+  }
+
+  /* ---- data rows ------------------------------------------------------- */
+
+  .rowline {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.375rem 0;
+    border-bottom: 1px solid var(--color-line);
+  }
+  .rowline:last-child {
+    border-bottom: 0;
+  }
+
+  /* Leader dots so a label and its number read as one line of evidence. */
+  .leader {
+    flex: 1;
+    height: 0;
+    border-bottom: 1px dotted var(--color-bone-ghost);
+    transform: translateY(-0.25em);
+    min-width: 1rem;
+  }
+}
+
+@layer utilities {
+  .hair-x > * + * {
+    border-left: 1px solid var(--color-line);
+  }
+  .hair-y > * + * {
+    border-top: 1px solid var(--color-line);
+  }
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* ==========================================================================
+   Motion. Only where a value changed or a check resolved.
+   ========================================================================== */
+
+@keyframes sp-flash {
+  0% {
+    background-color: rgba(47, 212, 200, 0.28);
+    color: var(--color-teal);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+.sp-flash {
+  animation: sp-flash 720ms cubic-bezier(0.2, 0, 0.1, 1);
+}
+
+@keyframes sp-scan {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+.sp-scan::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(47, 212, 200, 0.11) 45%,
+    rgba(47, 212, 200, 0.2) 50%,
+    rgba(47, 212, 200, 0.11) 55%,
+    transparent 100%
+  );
+  animation: sp-scan 1150ms linear infinite;
+}
+
+@keyframes sp-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+.sp-pulse {
+  animation: sp-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes sp-seat {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.sp-seat {
+  animation: sp-seat 260ms cubic-bezier(0.2, 0, 0.1, 1) both;
+}
+
+@keyframes sp-caret {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+.sp-caret {
+  animation: sp-caret 1.05s steps(1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sp-flash,
+  .sp-scan::after,
+  .sp-pulse,
+  .sp-seat,
+  .sp-caret {
+    animation: none !important;
+  }
+}

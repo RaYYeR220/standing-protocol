@@ -2,7 +2,7 @@
 pragma solidity 0.8.30;
 
 /// @notice The Cleanverse compliance policy contract.
-/// @dev Deployed at 0x36489be45fa84f70a0c2bdb11d824be608cb12dd on Monad (and Base).
+/// @dev Deployed at 0x36489bE45fa84f70a0c2BDB11D824Be608CB12Dd on Monad (and Base).
 ///      Reachable as `aUSDC.policy()`. This is the contract that decides, on-chain, whether a
 ///      transfer of a Cleanverse Verified Asset between two parties is allowed. Rules are attached
 ///      per registered contract, and are evaluated against the counterparties' A-Pass credentials.

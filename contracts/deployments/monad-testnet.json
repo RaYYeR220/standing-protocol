@@ -1,0 +1,25 @@
+{
+  "network": "monad-testnet",
+  "chainId": 10143,
+  "rpc": "https://testnet-rpc.monad.xyz",
+  "explorer": "https://testnet.monadexplorer.com",
+  "deployedAt": "2026-08-08T08:35:00Z",
+  "protocol": {
+    "StandingRegistry": "0xE066669d09afd30444429003987b9E7BcA970F19",
+    "StandingPool": "0x5ae228215dae30EC07D0196B13179CFA00146D03",
+    "CreditManager": "0x324719787E22a7c2c3E77bc84484317c2D2D1093"
+  },
+  "cleanverse": {
+    "apassRegistry": "0xbA82D189540CaC9DC6FF46B6837CaC1BFdEC58B9",
+    "policy": "0x36489bE45fa84f70a0c2BDB11D824Be608CB12Dd",
+    "accessCore": "0x8F118338a1fa41E7Fa86Be19A4e8B99Ed58A6EcC",
+    "verifiedAsset": "0xaC0893567D43C3E7e6e35a72803df05416C1f20D",
+    "verifiedAssetSymbol": "aUSDC",
+    "originToken": "0x534b2f3A21130d7a60830c2Df862319e593943A3"
+  },
+  "limits": {
+    "maxLoanPrincipal": "25000000000",
+    "maxCreditLine": "50000000000",
+    "maxTermSeconds": 31536000
+  }
+}

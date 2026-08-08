@@ -32,8 +32,6 @@ contract CreditManager is ComplianceGate, AccessControl, ReentrancyGuard {
     using SafeERC20 for IERC20;
     using StandingMath for uint256;
 
-    bytes32 public constant SERVICER_ROLE = keccak256("SERVICER_ROLE");
-
     enum Status {
         None,
         Active,
@@ -76,6 +74,13 @@ contract CreditManager is ComplianceGate, AccessControl, ReentrancyGuard {
     uint256 public immutable maxTermSeconds;
 
     uint256 public constant MIN_TERM_SECONDS = 1 days;
+
+    /// @notice Smallest loan the protocol will write.
+    /// @dev A dust loan rounds both its collateral and its interest to zero, so without a floor a
+    ///      borrower could open and close one repeatedly at no cost and manufacture the repayment
+    ///      history the score is meant to measure. Together with the registry's minimum holding
+    ///      period this makes standing something you have to actually spend time and money to earn.
+    uint256 public constant MIN_LOAN_PRINCIPAL = 1e6;
 
     /// @notice How long after maturity a borrower has before the loan can be written off.
     uint256 public constant GRACE_PERIOD = 3 days;
@@ -131,14 +136,13 @@ contract CreditManager is ComplianceGate, AccessControl, ReentrancyGuard {
         uint256 maxLoanPrincipal_,
         uint256 maxCreditLine_,
         uint256 maxTermSeconds_
-    ) ComplianceGate(apassRegistry_, policy_, asset_) {
+    ) ComplianceGate(apassRegistry_, policy_, asset_, admin) {
         pool = StandingPool(pool_);
         registry = StandingRegistry(registry_);
         maxLoanPrincipal = maxLoanPrincipal_;
         maxCreditLine = maxCreditLine_;
         maxTermSeconds = maxTermSeconds_;
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
-        _grantRole(SERVICER_ROLE, admin);
     }
 
     // ---------------------------------------------------------------- underwriting (view)
@@ -156,7 +160,12 @@ contract CreditManager is ComplianceGate, AccessControl, ReentrancyGuard {
         q.refusal = reason;
 
         ApassReader.Credential memory c = credentialOf(borrower);
-        StandingRegistry.History memory h = registry.historyOf(c.kycHash);
+        bytes32 identity = registry.canonicalIdentity(
+            c.previousKycHash != bytes32(0) && registry.supersedes(c.kycHash) == bytes32(0)
+                ? c.previousKycHash
+                : c.kycHash
+        );
+        StandingRegistry.History memory h = registry.historyOf(identity);
         uint256 balance = IERC20(verifiedAsset).balanceOf(borrower);
 
         q.breakdown = StandingMath.score(c, h, balance, block.timestamp);
@@ -165,7 +174,7 @@ contract CreditManager is ComplianceGate, AccessControl, ReentrancyGuard {
         StandingMath.Terms memory t = StandingMath.terms(q.score, maxCreditLine);
         q.creditLine = t.creditLine;
         q.aprBps = t.aprBps;
-        q.alreadyDrawn = drawnByIdentity[c.kycHash];
+        q.alreadyDrawn = drawnByIdentity[identity];
 
         uint256 headroom = t.creditLine > q.alreadyDrawn ? t.creditLine - q.alreadyDrawn : 0;
         if (headroom > maxLoanPrincipal) headroom = maxLoanPrincipal;
@@ -176,7 +185,7 @@ contract CreditManager is ComplianceGate, AccessControl, ReentrancyGuard {
         q.collateralRequired = (amount * t.collateralBps) / 10_000;
         q.interestForTerm = _interest(amount, t.aprBps, termSeconds);
 
-        q.approved = allowed && t.eligible && c.kycHash != bytes32(0) && amount > 0
+        q.approved = allowed && t.eligible && c.kycHash != bytes32(0) && amount >= MIN_LOAN_PRINCIPAL
             && amount <= q.maxDrawNow && termSeconds >= MIN_TERM_SECONDS && termSeconds <= maxTermSeconds;
     }
 
@@ -191,18 +200,27 @@ contract CreditManager is ComplianceGate, AccessControl, ReentrancyGuard {
         _requireCompliant(address(pool), msg.sender, amount);
 
         if (termSeconds < MIN_TERM_SECONDS || termSeconds > maxTermSeconds) revert InvalidTerm(termSeconds);
-        if (amount == 0 || amount > maxLoanPrincipal) revert ExceedsLoanCeiling(amount, maxLoanPrincipal);
+        if (amount < MIN_LOAN_PRINCIPAL || amount > maxLoanPrincipal) {
+            revert ExceedsLoanCeiling(amount, maxLoanPrincipal);
+        }
 
         ApassReader.Credential memory c = credentialOf(msg.sender);
         if (c.kycHash == bytes32(0)) revert NoIdentity();
 
-        StandingRegistry.History memory h = registry.historyOf(c.kycHash);
+        // A re-issued credential carries the hash it replaced. Stitching them together here — before
+        // anything is read — is what stops a borrower shedding a default by re-verifying.
+        if (c.previousKycHash != bytes32(0)) {
+            registry.linkIdentity(c.previousKycHash, c.kycHash);
+        }
+        bytes32 identity = registry.canonicalIdentity(c.kycHash);
+
+        StandingRegistry.History memory h = registry.historyOf(identity);
         uint256 balance = IERC20(verifiedAsset).balanceOf(msg.sender);
         StandingMath.Breakdown memory b = StandingMath.score(c, h, balance, block.timestamp);
         if (b.score < StandingMath.MIN_SCORE) revert BelowMinimumStanding(b.score, StandingMath.MIN_SCORE);
 
         StandingMath.Terms memory t = StandingMath.terms(b.score, maxCreditLine);
-        uint256 drawn = drawnByIdentity[c.kycHash];
+        uint256 drawn = drawnByIdentity[identity];
         uint256 headroom = t.creditLine > drawn ? t.creditLine - drawn : 0;
         if (amount > headroom) revert ExceedsCreditLine(amount, headroom);
 
@@ -212,7 +230,7 @@ contract CreditManager is ComplianceGate, AccessControl, ReentrancyGuard {
         loanId = _nextLoanId++;
         _loans[loanId] = Loan({
             borrower: msg.sender,
-            kycHash: c.kycHash,
+            kycHash: identity,
             principal: uint128(amount),
             collateral: uint128(collateral),
             interestDue: uint128(interest),
@@ -221,17 +239,17 @@ contract CreditManager is ComplianceGate, AccessControl, ReentrancyGuard {
             aprBps: uint16(t.aprBps),
             status: Status.Active
         });
-        _loansByIdentity[c.kycHash].push(loanId);
-        drawnByIdentity[c.kycHash] = drawn + amount;
+        _loansByIdentity[identity].push(loanId);
+        drawnByIdentity[identity] = drawn + amount;
 
         if (collateral > 0) {
             IERC20(verifiedAsset).safeTransferFrom(msg.sender, address(this), collateral);
         }
-        registry.recordOrigination(c.kycHash, msg.sender, amount);
+        registry.recordOrigination(identity, msg.sender, amount);
         pool.fundLoan(msg.sender, amount);
 
         emit LoanOpened(
-            loanId, msg.sender, c.kycHash, amount, collateral, t.aprBps, block.timestamp + termSeconds, b.score
+            loanId, msg.sender, identity, amount, collateral, t.aprBps, block.timestamp + termSeconds, b.score
         );
     }
 
@@ -253,13 +271,20 @@ contract CreditManager is ComplianceGate, AccessControl, ReentrancyGuard {
         l.status = Status.Repaid;
         drawnByIdentity[l.kycHash] -= principal;
 
-        IERC20(verifiedAsset).safeTransferFrom(msg.sender, address(pool), principal + interest);
+        // The pool's books are closed before the money arrives, not after. A verified asset calls
+        // out to its policy contract on transfer, so there is a real window in which control leaves
+        // this contract mid-repayment; retiring the principal first means `totalAssets` is briefly
+        // understated rather than double-counted, and an LP redeeming inside that window cannot be
+        // paid out of principal the pool has not yet received.
         pool.settleRepayment(principal, interest);
+        IERC20(verifiedAsset).safeTransferFrom(msg.sender, address(pool), principal + interest);
 
         if (collateral > 0) {
             IERC20(verifiedAsset).safeTransfer(l.borrower, collateral);
         }
-        registry.recordRepayment(l.kycHash, msg.sender, principal, interest);
+        registry.recordRepayment(
+            l.kycHash, msg.sender, principal, interest, block.timestamp - l.openedAt
+        );
 
         emit LoanRepaid(loanId, msg.sender, principal, interest);
     }
@@ -281,8 +306,10 @@ contract CreditManager is ComplianceGate, AccessControl, ReentrancyGuard {
         l.status = Status.Defaulted;
         drawnByIdentity[l.kycHash] -= principal;
 
-        // Collateral covers what it covers; the shortfall is a real loss to depositors.
-        uint256 recovered = collateral > principal ? principal : collateral;
+        // Collateral covers what it covers; the shortfall is a real loss to depositors. Because
+        // the terms curve tops out at 80% collateral, `collateral < principal` always holds and
+        // there is never a surplus to return.
+        uint256 recovered = collateral;
         uint256 shortfall = principal - recovered;
 
         if (recovered > 0) {
@@ -291,9 +318,6 @@ contract CreditManager is ComplianceGate, AccessControl, ReentrancyGuard {
         }
         if (shortfall > 0) {
             pool.absorbLoss(shortfall);
-        }
-        if (collateral > recovered) {
-            IERC20(verifiedAsset).safeTransfer(l.borrower, collateral - recovered);
         }
 
         // The standing hit is the actual security behind the loan: it is written against the

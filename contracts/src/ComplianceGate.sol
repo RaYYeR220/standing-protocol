@@ -13,13 +13,21 @@ import {ICleanversePolicy} from "./interfaces/ICleanverse.sol";
 ///      is updated — because nothing re-reads it.
 ///
 ///      Here the check runs inside the transaction that moves the money, against live state, every
-///      time. Three conditions, all evaluated on-chain:
+///      time. Four conditions, all evaluated on-chain:
 ///
-///        1. the party holds an A-Pass that is present, active and unexpired;
-///        2. Cleanverse's policy engine permits the transfer under the asset's own rules;
-///        3. if this protocol has been registered as a policy subject, its own rule set permits it too.
+///        1. the sender holds an A-Pass that is present, active and unexpired;
+///        2. so does the recipient;
+///        3. Cleanverse's policy engine permits the transfer under the asset's own rules;
+///        4. if this protocol has been registered as a policy subject, its own rule set permits it too.
 ///
-///      Condition 3 is what makes the protocol a first-class participant in the compliance system
+///      Both ends are checked because Cleanverse checks both ends: its policy engine *reverts* on an
+///      uncredentialed counterparty rather than returning false. A consequence worth stating plainly
+///      is that the pool contract is itself a party to every disbursement, so the pool must hold its
+///      own A-Pass — the protocol is a verified participant in the network, not an anonymous
+///      intermediary standing between verified ones. Until that credential is issued the gate
+///      refuses everything, which is the correct behaviour and not a degraded mode.
+///
+///      Condition 4 is what makes the protocol a first-class participant in the compliance system
 ///      rather than a consumer of it: an operator can tighten who may borrow or lend by changing a
 ///      rule at Cleanverse, and the contracts obey without being redeployed.
 ///
@@ -27,8 +35,6 @@ import {ICleanversePolicy} from "./interfaces/ICleanverse.sol";
 ///      inconclusive result to be retried or ignored — if compliance cannot be established, value
 ///      does not move.
 abstract contract ComplianceGate {
-    using ApassReader for ApassReader.Credential;
-
     /// @notice The Cleanverse A-Pass registry (CVI).
     address public immutable apassRegistry;
 
@@ -37,6 +43,13 @@ abstract contract ComplianceGate {
 
     /// @notice The Cleanverse Verified Asset this protocol denominates everything in (CVA).
     address public immutable verifiedAsset;
+
+    /// @notice The account that controls this deployment.
+    /// @dev Cleanverse registers a contract as a policy subject only against a signature from the
+    ///      address this returns, so the accessor is part of the integration surface rather than an
+    ///      ownership model — nothing in the protocol grants `owner` any authority. Permissions are
+    ///      held as roles; this is proof of provenance, not a backdoor.
+    address public immutable owner;
 
     /// @notice Why a party or a transfer was refused.
     enum Refusal {
@@ -48,14 +61,13 @@ abstract contract ComplianceGate {
         ProtocolPolicyDenied
     }
 
-    event ComplianceRefused(address indexed party, Refusal reason, uint256 amount);
-
     error NotCompliant(address party, Refusal reason);
 
-    constructor(address apassRegistry_, address policy_, address verifiedAsset_) {
+    constructor(address apassRegistry_, address policy_, address verifiedAsset_, address owner_) {
         apassRegistry = apassRegistry_;
         policy = ICleanversePolicy(policy_);
         verifiedAsset = verifiedAsset_;
+        owner = owner_;
     }
 
     /// @notice Reads the live credential of a party.
@@ -63,37 +75,69 @@ abstract contract ComplianceGate {
         return ApassReader.read(apassRegistry, party);
     }
 
-    /// @notice Evaluates the full gate without reverting, so a UI can show a lender exactly which
+    /// @notice Evaluates the full gate without reverting, so a front end can show exactly which
     ///         condition a counterparty fails before anyone signs a transaction.
     function checkTransfer(address from, address to, uint256 amount)
         public
         view
         returns (bool allowed, Refusal reason)
     {
-        ApassReader.Credential memory c = credentialOf(to);
+        address party;
+        (allowed, reason, party) = checkTransferDetailed(from, to, amount);
+    }
+
+    /// @notice As {checkTransfer}, and also names the party that failed.
+    /// @dev A refusal is only actionable if you know who caused it — "this transfer is
+    ///      non-compliant" is not something a borrower can do anything about, whereas "your
+    ///      credential expired on the 4th" is.
+    function checkTransferDetailed(address from, address to, uint256 amount)
+        public
+        view
+        returns (bool allowed, Refusal reason, address party)
+    {
+        (bool fromOk, Refusal fromReason) = checkParty(from);
+        if (!fromOk) return (false, fromReason, from);
+
+        (bool toOk, Refusal toReason) = checkParty(to);
+        if (!toOk) return (false, toReason, to);
+
+        if (!_policyAllows(verifiedAsset, from, to, amount)) {
+            return (false, Refusal.AssetPolicyDenied, to);
+        }
+
+        if (_isProtocolRegistered() && !_policyAllows(address(this), from, to, amount)) {
+            return (false, Refusal.ProtocolPolicyDenied, to);
+        }
+
+        return (true, Refusal.None, address(0));
+    }
+
+    /// @notice Whether a single party currently holds a usable credential.
+    function checkParty(address party) public view returns (bool ok, Refusal reason) {
+        ApassReader.Credential memory c = credentialOf(party);
         if (!c.exists) return (false, Refusal.NoCredential);
         if (c.status != ApassReader.STATUS_ACTIVE) return (false, Refusal.CredentialFrozen);
         if (c.expiresAt <= block.timestamp) return (false, Refusal.CredentialExpired);
-
-        if (!_policyAllows(verifiedAsset, from, to, amount)) return (false, Refusal.AssetPolicyDenied);
-
-        if (_isProtocolRegistered() && !_policyAllows(address(this), from, to, amount)) {
-            return (false, Refusal.ProtocolPolicyDenied);
-        }
-
         return (true, Refusal.None);
     }
 
-    /// @notice Same as {checkTransfer} but reverts, for use on the path that actually moves value.
-    function _requireCompliant(address from, address to, uint256 amount) internal {
-        (bool allowed, Refusal reason) = checkTransfer(from, to, amount);
-        if (!allowed) {
-            emit ComplianceRefused(to, reason, amount);
-            revert NotCompliant(to, reason);
-        }
+    /// @notice Reverting form, for the path that actually moves value.
+    function _requireCompliant(address from, address to, uint256 amount) internal view {
+        (bool allowed, Refusal reason, address party) = checkTransferDetailed(from, to, amount);
+        if (!allowed) revert NotCompliant(party, reason);
     }
 
-    /// @dev Fails closed: an unreachable or reverting policy engine is a refusal.
+    /// @notice Requires a single party to hold a usable credential, without implying a transfer.
+    /// @dev Used where someone acquires or gives up a claim on verified assets without being the
+    ///      immediate recipient of a transfer — a share owner being redeemed from, for instance.
+    function _requireParty(address party) internal view {
+        (bool ok, Refusal reason) = checkParty(party);
+        if (!ok) revert NotCompliant(party, reason);
+    }
+
+    /// @dev Fails closed: an unreachable or reverting policy engine is a refusal. The engine really
+    ///      does revert — on an uncredentialed party it returns a custom error rather than false —
+    ///      so this catch is on the normal path, not an exotic one.
     function _policyAllows(address subject, address from, address to, uint256 amount)
         private
         view

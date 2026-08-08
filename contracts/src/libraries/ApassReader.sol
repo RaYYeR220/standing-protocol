@@ -36,8 +36,12 @@ library ApassReader {
     /// @param subGroup Institution-defined sub-group tag.
     /// @param expiresAt Unix seconds after which the credential is no longer valid.
     /// @param issuedAt Unix seconds the credential was issued or last updated.
-    /// @param kycHash Hash of the underlying bank-verified identity. Stable across the holder's
-    ///        credential lifetime and the anchor this protocol keys reputation to.
+    /// @param kycHash Hash of the underlying bank-verified identity — the anchor this protocol
+    ///        keys reputation to.
+    /// @param previousKycHash The hash this credential superseded, or zero if it never rotated.
+    ///        Cleanverse re-issues a credential with a fresh `kycHash` when the holder re-verifies,
+    ///        and this field is the only link back. Without it a borrower could shed a default
+    ///        simply by re-doing KYC, so the protocol reads it and stitches the identities together.
     struct Credential {
         bool exists;
         uint8 status;
@@ -48,6 +52,7 @@ library ApassReader {
         uint64 expiresAt;
         uint64 issuedAt;
         bytes32 kycHash;
+        bytes32 previousKycHash;
     }
 
     /// @notice Reads and decodes the A-Pass credential bound to `account`.
@@ -70,7 +75,7 @@ library ApassReader {
             bytes32 subGroup,
             uint256 expiresAt,
             uint256 issuedAt,
-            , // previous KYC hash, superseded by the current one
+            bytes32 previousKycHash,
             bytes32 kycHash,
         ) = abi.decode(
             ret,
@@ -89,6 +94,7 @@ library ApassReader {
         c.expiresAt = expiresAt > type(uint64).max ? type(uint64).max : uint64(expiresAt);
         c.issuedAt = issuedAt > type(uint64).max ? type(uint64).max : uint64(issuedAt);
         c.kycHash = kycHash;
+        c.previousKycHash = previousKycHash;
     }
 
     /// @notice Whether a credential is currently usable: present, active, and not expired.

@@ -9,20 +9,32 @@ import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 /// @dev Every other on-chain reputation system keys off an address, which makes it worthless as
 ///      collateral: a borrower who defaults funds a fresh wallet and starts over. This registry
 ///      keys off the A-Pass `kycHash` — the hash of the bank-verified identity behind the
-///      credential — so history follows the person, not the key they happen to hold. Moving to a
-///      new wallet carries the record over; walking away from a default does not shed it.
+///      credential — so history follows the person, not the key they happen to hold.
 ///
-///      That is the whole basis on which this protocol lends without collateral, so the registry is
-///      deliberately dumb: it records what happened and nothing else. Interpretation lives in
-///      StandingMath, and only the credit manager may write.
+///      That closes the obvious hole and opens a subtler one. Cleanverse re-issues a credential
+///      with a *new* `kycHash` when a holder re-verifies, and the old hash is preserved only as
+///      `previousKycHash` on the new record. A registry that ignored that field would let a
+///      defaulter launder their record by re-doing KYC — the one escape route that would make the
+///      whole protocol unsound. So identities are unioned: linking a new hash to the one it
+///      superseded folds it into the same record, permanently.
+///
+///      Interpretation lives in StandingMath. This contract only records what happened, and only
+///      the credit manager may write. The deployment script renounces admin, so the recorder set is
+///      frozen at deployment and history cannot be forged after the fact.
 contract StandingRegistry is AccessControl {
     bytes32 public constant RECORDER_ROLE = keccak256("RECORDER_ROLE");
 
+    /// @notice A repayment on a loan held for less than this does not count towards standing.
+    /// @dev Without it, opening and closing a loan in the same block is free — dust rounds interest
+    ///      and collateral to zero — and ten of them would buy the entire repayment component of the
+    ///      score. Credit history has to cost time to acquire or it is not evidence of anything.
+    uint256 public constant MIN_QUALIFYING_HOLD = 1 days;
+
     /// @param loansOriginated Loans ever drawn by this identity.
-    /// @param loansRepaid Loans repaid in full.
+    /// @param loansRepaid Loans repaid in full after being held at least {MIN_QUALIFYING_HOLD}.
     /// @param loansDefaulted Loans that were written off.
     /// @param totalBorrowed Cumulative principal drawn, in asset units.
-    /// @param totalRepaid Cumulative principal plus interest returned, in asset units.
+    /// @param totalRepaid Cumulative qualifying principal plus interest returned, in asset units.
     /// @param totalDefaulted Cumulative principal written off, in asset units.
     /// @param firstSeenAt Unix seconds of this identity's first origination.
     /// @param lastActivityAt Unix seconds of the most recent record.
@@ -37,17 +49,23 @@ contract StandingRegistry is AccessControl {
         uint64 lastActivityAt;
     }
 
-    mapping(bytes32 kycHash => History) private _history;
+    mapping(bytes32 identity => History) private _history;
+
+    /// @dev Union-find over KYC hashes: a re-issued credential points at the one it replaced.
+    mapping(bytes32 identity => bytes32 supersedes) private _supersedes;
 
     /// @notice Wallets observed acting under a given identity, in first-seen order.
     /// @dev Kept for auditability — a default report has to name the wallets, not just the hash.
-    mapping(bytes32 kycHash => address[]) private _wallets;
-    mapping(bytes32 kycHash => mapping(address wallet => bool)) private _knownWallet;
+    mapping(bytes32 identity => address[]) private _wallets;
+    mapping(bytes32 identity => mapping(address wallet => bool)) private _knownWallet;
 
-    event LoanOriginated(bytes32 indexed kycHash, address indexed wallet, uint256 amount);
-    event LoanRepaid(bytes32 indexed kycHash, address indexed wallet, uint256 principal, uint256 interest);
-    event LoanDefaulted(bytes32 indexed kycHash, address indexed wallet, uint256 principalLost);
-    event WalletLinked(bytes32 indexed kycHash, address indexed wallet);
+    event LoanOriginated(bytes32 indexed identity, address indexed wallet, uint256 amount);
+    event LoanRepaid(
+        bytes32 indexed identity, address indexed wallet, uint256 principal, uint256 interest, bool qualifying
+    );
+    event LoanDefaulted(bytes32 indexed identity, address indexed wallet, uint256 principalLost);
+    event WalletLinked(bytes32 indexed identity, address indexed wallet);
+    event IdentityLinked(bytes32 indexed reissued, bytes32 indexed canonical);
 
     error InvalidIdentity();
 
@@ -55,56 +73,136 @@ contract StandingRegistry is AccessControl {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
     }
 
+    // ---------------------------------------------------------------- identity
+
+    /// @notice Resolves a KYC hash to the identity record it belongs to.
+    /// @dev Follows the supersession chain. Bounded so a pathological chain cannot make reads
+    ///      un-gas-able; eight re-verifications is far beyond anything a credential does in practice.
+    function canonicalIdentity(bytes32 kycHash) public view returns (bytes32) {
+        bytes32 cur = kycHash;
+        for (uint256 i = 0; i < 8; ++i) {
+            bytes32 parent = _supersedes[cur];
+            if (parent == bytes32(0) || parent == cur) break;
+            cur = parent;
+        }
+        return cur;
+    }
+
+    /// @notice Folds a re-issued credential into the record of the credential it replaced.
+    /// @dev Idempotent and one-way: once a hash is linked it cannot be re-pointed, so a link can
+    ///      never be used to move an identity off its own history.
+    function linkIdentity(bytes32 previousKycHash, bytes32 currentKycHash)
+        external
+        onlyRole(RECORDER_ROLE)
+    {
+        if (previousKycHash == bytes32(0) || currentKycHash == bytes32(0)) return;
+        if (previousKycHash == currentKycHash) return;
+        if (_supersedes[currentKycHash] != bytes32(0)) return;
+
+        bytes32 canonical = canonicalIdentity(previousKycHash);
+        if (canonical == currentKycHash) return; // would close a cycle
+
+        _supersedes[currentKycHash] = canonical;
+        _merge(currentKycHash, canonical);
+        emit IdentityLinked(currentKycHash, canonical);
+    }
+
+    // ---------------------------------------------------------------- recording
+
     function recordOrigination(bytes32 kycHash, address wallet, uint256 amount)
         external
         onlyRole(RECORDER_ROLE)
     {
-        if (kycHash == bytes32(0)) revert InvalidIdentity();
-        History storage h = _history[kycHash];
+        bytes32 id = _require(kycHash);
+        History storage h = _history[id];
         if (h.firstSeenAt == 0) h.firstSeenAt = uint64(block.timestamp);
         h.loansOriginated += 1;
         h.totalBorrowed += uint128(amount);
         h.lastActivityAt = uint64(block.timestamp);
-        _link(kycHash, wallet);
-        emit LoanOriginated(kycHash, wallet, amount);
+        _link(id, wallet);
+        emit LoanOriginated(id, wallet, amount);
     }
 
-    function recordRepayment(bytes32 kycHash, address wallet, uint256 principal, uint256 interest)
-        external
-        onlyRole(RECORDER_ROLE)
-    {
-        if (kycHash == bytes32(0)) revert InvalidIdentity();
-        History storage h = _history[kycHash];
-        h.loansRepaid += 1;
-        h.totalRepaid += uint128(principal + interest);
+    /// @param heldSeconds How long the loan was outstanding. Repayments on loans held for less than
+    ///        {MIN_QUALIFYING_HOLD} are recorded but do not count towards standing.
+    function recordRepayment(
+        bytes32 kycHash,
+        address wallet,
+        uint256 principal,
+        uint256 interest,
+        uint256 heldSeconds
+    ) external onlyRole(RECORDER_ROLE) {
+        bytes32 id = _require(kycHash);
+        History storage h = _history[id];
+        bool qualifying = heldSeconds >= MIN_QUALIFYING_HOLD;
+        if (qualifying) {
+            h.loansRepaid += 1;
+            h.totalRepaid += uint128(principal + interest);
+        }
         h.lastActivityAt = uint64(block.timestamp);
-        emit LoanRepaid(kycHash, wallet, principal, interest);
+        emit LoanRepaid(id, wallet, principal, interest, qualifying);
     }
 
     function recordDefault(bytes32 kycHash, address wallet, uint256 principalLost)
         external
         onlyRole(RECORDER_ROLE)
     {
-        if (kycHash == bytes32(0)) revert InvalidIdentity();
-        History storage h = _history[kycHash];
+        bytes32 id = _require(kycHash);
+        History storage h = _history[id];
         h.loansDefaulted += 1;
         h.totalDefaulted += uint128(principalLost);
         h.lastActivityAt = uint64(block.timestamp);
-        emit LoanDefaulted(kycHash, wallet, principalLost);
+        _link(id, wallet);
+        emit LoanDefaulted(id, wallet, principalLost);
     }
 
+    // ---------------------------------------------------------------- views
+
     function historyOf(bytes32 kycHash) external view returns (History memory) {
-        return _history[kycHash];
+        return _history[canonicalIdentity(kycHash)];
     }
 
     function walletsOf(bytes32 kycHash) external view returns (address[] memory) {
-        return _wallets[kycHash];
+        return _wallets[canonicalIdentity(kycHash)];
     }
 
-    function _link(bytes32 kycHash, address wallet) private {
-        if (wallet == address(0) || _knownWallet[kycHash][wallet]) return;
-        _knownWallet[kycHash][wallet] = true;
-        _wallets[kycHash].push(wallet);
-        emit WalletLinked(kycHash, wallet);
+    function supersedes(bytes32 kycHash) external view returns (bytes32) {
+        return _supersedes[kycHash];
+    }
+
+    // ---------------------------------------------------------------- internals
+
+    function _require(bytes32 kycHash) private view returns (bytes32) {
+        if (kycHash == bytes32(0)) revert InvalidIdentity();
+        return canonicalIdentity(kycHash);
+    }
+
+    /// @dev Carries any record accrued under a hash before it was known to be a re-issue.
+    function _merge(bytes32 from, bytes32 into) private {
+        History storage a = _history[from];
+        if (a.loansOriginated == 0 && a.loansDefaulted == 0 && a.loansRepaid == 0) return;
+        History storage b = _history[into];
+        b.loansOriginated += a.loansOriginated;
+        b.loansRepaid += a.loansRepaid;
+        b.loansDefaulted += a.loansDefaulted;
+        b.totalBorrowed += a.totalBorrowed;
+        b.totalRepaid += a.totalRepaid;
+        b.totalDefaulted += a.totalDefaulted;
+        if (b.firstSeenAt == 0 || (a.firstSeenAt != 0 && a.firstSeenAt < b.firstSeenAt)) {
+            b.firstSeenAt = a.firstSeenAt;
+        }
+        if (a.lastActivityAt > b.lastActivityAt) b.lastActivityAt = a.lastActivityAt;
+
+        address[] storage ws = _wallets[from];
+        for (uint256 i = 0; i < ws.length; ++i) _link(into, ws[i]);
+
+        delete _history[from];
+    }
+
+    function _link(bytes32 identity, address wallet) private {
+        if (wallet == address(0) || _knownWallet[identity][wallet]) return;
+        _knownWallet[identity][wallet] = true;
+        _wallets[identity].push(wallet);
+        emit WalletLinked(identity, wallet);
     }
 }

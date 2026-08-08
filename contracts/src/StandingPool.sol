@@ -54,7 +54,7 @@ contract StandingPool is ERC4626, AccessControl, ComplianceGate {
     constructor(address asset_, address apassRegistry_, address policy_, address admin)
         ERC20("Standing Pool aUSDC", "stdaUSDC")
         ERC4626(IERC20(asset_))
-        ComplianceGate(apassRegistry_, policy_, asset_)
+        ComplianceGate(apassRegistry_, policy_, asset_, admin)
     {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         _grantRole(RISK_ADMIN_ROLE, admin);
@@ -81,19 +81,11 @@ contract StandingPool is ERC4626, AccessControl, ComplianceGate {
 
     // ---------------------------------------------------------------- compliance-gated ERC-4626
 
-    /// @inheritdoc ERC4626
-    /// @dev Reports zero for a party that cannot legally hold a position, so a front end can refuse
-    ///      before a signature rather than after a revert.
-    function maxDeposit(address receiver) public view override returns (uint256) {
-        (bool allowed,) = checkTransfer(address(this), receiver, 0);
-        return allowed ? type(uint256).max : 0;
-    }
-
-    /// @inheritdoc ERC4626
-    function maxMint(address receiver) public view override returns (uint256) {
-        (bool allowed,) = checkTransfer(address(this), receiver, 0);
-        return allowed ? type(uint256).max : 0;
-    }
+    /// @dev The compliance gate deliberately does NOT live in `maxDeposit`. ERC-4626 makes callers
+    ///      revert with `ERC4626ExceededMaxDeposit` when they exceed the reported maximum, which
+    ///      would swallow the actual reason a lender was refused. The gate is enforced in
+    ///      `_deposit`, where it can revert with `NotCompliant` and name the failing condition;
+    ///      front ends preflight with {checkTransferDetailed} instead of inferring from a cap.
 
     /// @inheritdoc ERC4626
     function maxWithdraw(address owner) public view override returns (uint256) {
@@ -118,13 +110,41 @@ contract StandingPool is ERC4626, AccessControl, ComplianceGate {
         super._deposit(caller, receiver, assets, shares);
     }
 
-    /// @dev And may only leave to one. Checked again at redemption against live credential state.
-    function _withdraw(address caller, address receiver, address owner, uint256 assets, uint256 shares)
-        internal
-        override
-    {
+    /// @dev And may only leave to one — checked again at redemption against live credential state.
+    ///      All three roles are checked, not just the recipient: a lender whose credential is frozen
+    ///      cannot exit by nominating a second wallet of their own as receiver, and cannot have a
+    ///      third party redeem on their behalf. The owner of the shares is a party to the exit even
+    ///      though no asset moves to them.
+    function _withdraw(
+        address caller,
+        address receiver,
+        address shareOwner,
+        uint256 assets,
+        uint256 shares
+    ) internal override {
+        _requireParty(shareOwner);
+        if (caller != shareOwner) _requireParty(caller);
         _requireCompliant(address(this), receiver, assets);
-        super._withdraw(caller, receiver, owner, assets, shares);
+        super._withdraw(caller, receiver, shareOwner, assets, shares);
+    }
+
+    /// @dev Pool shares are a claim on verified assets, so they are gated like the assets are.
+    ///      Without this the vault leaks: a frozen lender transfers their shares to an
+    ///      uncredentialed address, which redeems through any compliant receiver, and the
+    ///      credential check at the door has bought nothing.
+    function _update(address from, address to, uint256 value) internal override {
+        if (from != address(0) && to != address(0)) {
+            _requireParty(from);
+            _requireParty(to);
+        }
+        super._update(from, to, value);
+    }
+
+    /// @dev Virtual shares, per OpenZeppelin's inflation-attack mitigation. The vault's asset
+    ///      balance is readable by anyone and a plain transfer into it moves the share price, so the
+    ///      first depositor is otherwise grief-able down to zero shares.
+    function _decimalsOffset() internal pure override returns (uint8) {
+        return 6;
     }
 
     // ---------------------------------------------------------------- credit manager hooks
