@@ -11,7 +11,7 @@ import {CreditManager} from "../../src/CreditManager.sol";
 import {StandingPool} from "../../src/StandingPool.sol";
 import {StandingRegistry} from "../../src/StandingRegistry.sol";
 import {ApassReader} from "../../src/libraries/ApassReader.sol";
-import {ICleanverseAsset, ICleanversePolicy} from "../../src/interfaces/ICleanverse.sol";
+import {ICleanverseAsset, ICleanversePolicy, ICleanverseValidator} from "../../src/interfaces/ICleanverse.sol";
 
 /// @title CleanverseForkTest
 /// @notice Runs the protocol's identity and policy plumbing against the real Cleanverse contracts on
@@ -27,6 +27,14 @@ contract CleanverseForkTest is Test {
     address internal constant APASS = 0xbA82D189540CaC9DC6FF46B6837CaC1BFdEC58B9;
     address internal constant POLICY = 0x36489bE45fa84f70a0c2BDB11D824Be608CB12Dd;
     address internal constant AUSDC = 0xaC0893567D43C3E7e6e35a72803df05416C1f20D;
+    /// @dev The compliance validator: it carries a *registered contract's* own rule set, which is a
+    ///      different thing from the token policy above. `policy.isTokenRegistered` was always false
+    ///      for our contracts because that question belongs to this contract, not that one.
+    address internal constant VALIDATOR = 0xaC7e5179C2C7f03f209136886c172eb34F161792;
+    /// @dev A deployment that really is registered with the validator, so condition 4 can be
+    ///      exercised against live rules rather than only skipped.
+    address internal constant REGISTERED_POOL = 0x382B067B3917f07880795396b6684e30B9d30907;
+    bytes4 internal constant VALIDATOR_VERIFY = 0xaf375463;
     address internal constant ORIGIN_USDC = 0x534b2f3A21130d7a60830c2Df862319e593943A3;
 
     /// @dev Wallets that hold a live A-Pass: tier 50, ACTIVE.
@@ -60,12 +68,13 @@ contract CleanverseForkTest is Test {
         string memory rpc = vm.envOr("MONAD_RPC_URL", MONAD_RPC);
         try vm.createSelectFork(rpc) {
             registry = new StandingRegistry(address(this));
-            pool = new StandingPool(AUSDC, APASS, POLICY, address(this));
+            pool = new StandingPool(AUSDC, APASS, POLICY, VALIDATOR, address(this));
             manager = new CreditManager(
                 address(pool),
                 address(registry),
                 APASS,
                 POLICY,
+                VALIDATOR,
                 AUSDC,
                 address(this),
                 25_000e6,
@@ -326,6 +335,60 @@ contract CleanverseForkTest is Test {
         (bool ok, ComplianceGate.Refusal partyReason) = pool.checkParty(NO_CREDENTIAL);
         assertFalse(ok);
         assertEq(uint256(partyReason), uint256(ComplianceGate.Refusal.NoCredential));
+    }
+
+    // ------------------------------------------------------------------ the validator, live
+
+    function test_Fork_Validator_IsBoundToTheSameRegistryAndPolicy() public view {
+        if (forkUnavailable) return;
+        assertGt(VALIDATOR.code.length, 0, "validator has code");
+        assertEq(ICleanverseValidator(VALIDATOR).apass(), APASS, "same A-Pass registry");
+        assertEq(ICleanverseValidator(VALIDATOR).tokenPolicy(), POLICY, "defers to the token policy");
+    }
+
+    /// @dev The distinction that was being missed: registration is a question for the validator, not
+    ///      for the token policy. Asking the policy about our own contract always answers false.
+    function test_Fork_Validator_OwnsRegistrationNotTheTokenPolicy() public view {
+        if (forkUnavailable) return;
+
+        assertTrue(ICleanverseValidator(VALIDATOR).isRegistered(REGISTERED_POOL), "registered here");
+        assertFalse(
+            ICleanversePolicy(POLICY).isTokenRegistered(REGISTERED_POOL),
+            "and not here, which is why condition 4 never fired before"
+        );
+
+        // A freshly deployed contract is not a subject until somebody registers it.
+        assertFalse(ICleanverseValidator(VALIDATOR).isRegistered(address(pool)), "fresh pool");
+        assertFalse(pool.isProtocolRegistered(), "so the gate skips its own rule set");
+    }
+
+    /// @dev The per-party verdict, live, on a subject that really is registered. This is condition 4
+    ///      answering for real rather than being skipped.
+    function test_Fork_Validator_PerPartyVerdictAnswersForARegisteredSubject() public view {
+        if (forkUnavailable) return;
+        if (!ICleanverseValidator(VALIDATOR).isRegistered(REGISTERED_POOL)) return;
+
+        (bool okHolder, bytes memory retHolder) = VALIDATOR.staticcall(
+            abi.encodeWithSelector(VALIDATOR_VERIFY, REGISTERED_POOL, HOLDER_A)
+        );
+        assertTrue(okHolder && retHolder.length >= 32, "the verdict answers");
+        assertTrue(abi.decode(retHolder, (bool)), "a live tier-50 A-Pass holder passes the rule set");
+
+        (bool okStranger, bytes memory retStranger) = VALIDATOR.staticcall(
+            abi.encodeWithSelector(VALIDATOR_VERIFY, REGISTERED_POOL, NO_CREDENTIAL)
+        );
+        assertTrue(okStranger && retStranger.length >= 32, "and answers for a stranger too");
+        assertFalse(abi.decode(retStranger, (bool)), "who does not pass it");
+    }
+
+    /// @dev An unregistered subject still gets an answer, so the gate's skip is driven by
+    ///      `isRegistered` rather than by the verdict failing.
+    function test_Fork_Validator_VerdictForAnUnregisteredSubjectIsNotTrusted() public view {
+        if (forkUnavailable) return;
+        assertFalse(ICleanverseValidator(VALIDATOR).isRegistered(address(pool)));
+
+        (bool allowed,,) = pool.checkTransferDetailed(HOLDER_B, HOLDER_A, 1e6);
+        assertTrue(allowed, "two live holders transact under the asset's rules alone");
     }
 
     function test_Fork_ComplianceGate_TreatsTheProtocolAsUnregisteredUntilCleanverseSaysOtherwise()

@@ -6,6 +6,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {MockApass} from "../mocks/MockApass.sol";
 import {MockPolicy} from "../mocks/MockPolicy.sol";
+import {MockValidator} from "../mocks/MockValidator.sol";
 import {MockVerifiedAsset} from "../mocks/MockVerifiedAsset.sol";
 
 import {ComplianceGate} from "../../src/ComplianceGate.sol";
@@ -21,6 +22,7 @@ import {StandingMath} from "../../src/libraries/StandingMath.sol";
 abstract contract Fixture is Test {
     MockApass internal apass;
     MockPolicy internal policy;
+    MockValidator internal validator;
     MockVerifiedAsset internal asset;
     StandingRegistry internal registry;
     StandingPool internal pool;
@@ -79,14 +81,18 @@ abstract contract Fixture is Test {
 
         apass = new MockApass();
         policy = new MockPolicy(address(apass));
+        validator = new MockValidator(address(apass), address(policy));
         asset = new MockVerifiedAsset(address(policy));
         registry = new StandingRegistry(admin);
-        pool = new StandingPool(address(asset), address(apass), address(policy), admin);
+        pool = new StandingPool(
+            address(asset), address(apass), address(policy), address(validator), admin
+        );
         manager = new CreditManager(
             address(pool),
             address(registry),
             address(apass),
             address(policy),
+            address(validator),
             address(asset),
             admin,
             MAX_LOAN_PRINCIPAL,

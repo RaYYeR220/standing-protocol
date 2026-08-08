@@ -250,7 +250,7 @@ contract PoolWindowsTest is Fixture {
         pool.collectSeizure(address(manager), COLLATERAL, 0);
 
         // And a second pool pointed at the same manager has no allowance and no authority.
-        StandingPool rogue = new StandingPool(address(asset), address(apass), address(policy), stranger);
+        StandingPool rogue = new StandingPool(address(asset), address(apass), address(policy), address(validator), stranger);
         vm.prank(stranger);
         rogue.setCreditManager(stranger);
         vm.expectRevert();

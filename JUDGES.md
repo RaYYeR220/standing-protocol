@@ -92,14 +92,14 @@ Monad testnet, chain id 10143:
 
 | | |
 |---|---|
-| `CreditManager` | [`0x77502D2AfBE8c2Bb3e9cD7ae9f0468e6D25997cb`](https://testnet.monadexplorer.com/address/0x77502D2AfBE8c2Bb3e9cD7ae9f0468e6D25997cb) |
-| `StandingPool` | [`0x382B067B3917f07880795396b6684e30B9d30907`](https://testnet.monadexplorer.com/address/0x382B067B3917f07880795396b6684e30B9d30907) |
-| `StandingRegistry` | [`0x05d68e4B5d79994096AeB62A04333C7491D63eD0`](https://testnet.monadexplorer.com/address/0x05d68e4B5d79994096AeB62A04333C7491D63eD0) |
+| `CreditManager` | [`0xC6E2aC49a18BfB71F2981efeaac2aC41Db1c1f74`](https://testnet.monadexplorer.com/address/0xC6E2aC49a18BfB71F2981efeaac2aC41Db1c1f74) |
+| `StandingPool` | [`0x010263d8e3b2DC38F63A3f1660D2502f204ffB6D`](https://testnet.monadexplorer.com/address/0x010263d8e3b2DC38F63A3f1660D2502f204ffB6D) |
+| `StandingRegistry` | [`0x2bD8832C9Bc98df47F256507a903B0338D96C0b5`](https://testnet.monadexplorer.com/address/0x2bD8832C9Bc98df47F256507a903B0338D96C0b5) |
 
 Read the credential of a real wallet straight off the live deployment:
 
 ```bash
-cast call 0x77502D2AfBE8c2Bb3e9cD7ae9f0468e6D25997cb \
+cast call 0xC6E2aC49a18BfB71F2981efeaac2aC41Db1c1f74 \
   "credentialOf(address)((bool,uint8,uint8,uint8,bytes2,bytes2,uint64,uint64,bytes32,bytes32))" \
   0x9E2816003da34Ea0E232Fb59A5e475Fce1121d98 \
   --rpc-url https://testnet-rpc.monad.xyz
@@ -107,15 +107,23 @@ cast call 0x77502D2AfBE8c2Bb3e9cD7ae9f0468e6D25997cb \
 
 ---
 
-## 6. The honest part
+## 6. The live loan
 
-The live deployment currently **refuses everything**, and that is the correct behaviour rather than
-a broken build. Cleanverse's policy engine checks both ends of a transfer, so the pool contract is
-itself a party to every disbursement and needs its own A-Pass — and `POST /generate_apass` has been
-returning `[CV_500] CV System error` for every wallet on Monad since shortly after we minted our
-first two credentials. We reported it, we are retrying on a loop, and until it clears the on-chain
-walkthrough lives on the fork.
+A real under-collateralized loan was drawn and repaid on Base Sepolia during the build window:
+3.000000 aUSDC principal against 2.365800 aUSDC of collateral — **78.86%**, so a fifth of the loan
+was carried by the credential rather than by assets. Every transaction is linked in
+[`PROOF.md`](PROOF.md), along with the moment an operator raised `min_tier` at Cleanverse and the
+on-chain verdict flipped to deny in the next block with no redeploy.
 
-Two other Cleanverse-side blockers, and everything we could not establish, are in
-[`CLAIMS.md`](CLAIMS.md) — along with the eight real bugs we found in our own contracts by attacking
-them ourselves, and the two we chose to document rather than fix.
+## 7. The honest part
+
+- A **default** takes a matured loan plus a three-day grace period, so the write-off is demonstrated
+  on a fork with compressed time rather than on a live chain. Everything it touches is real.
+- **Monad's pool is empty.** Cleanverse's USDC faucet on Monad was returning `failed to execute
+  token transfer` all day, so the live loan is on Base Sepolia. The same contracts are deployed,
+  credentialed and registered on Monad, and the gate is live there — there is simply nothing to lend.
+- **Testnet, not mainnet.** Sandbox credentials issue into testnet only.
+
+Everything we could not establish is in [`CLAIMS.md`](CLAIMS.md), stated with its evidence tier —
+along with the fourteen real bugs we found in our own contracts by attacking them ourselves, and the
+handful we chose to document rather than fix.

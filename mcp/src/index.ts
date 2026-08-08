@@ -25,10 +25,10 @@ const monadTestnet = defineChain({
 });
 
 const CREDIT_MANAGER = (process.env.CREDIT_MANAGER ??
-  "0x77502D2AfBE8c2Bb3e9cD7ae9f0468e6D25997cb") as Hex;
-const POOL = (process.env.STANDING_POOL ?? "0x382B067B3917f07880795396b6684e30B9d30907") as Hex;
+  "0xC6E2aC49a18BfB71F2981efeaac2aC41Db1c1f74") as Hex;
+const POOL = (process.env.STANDING_POOL ?? "0x010263d8e3b2DC38F63A3f1660D2502f204ffB6D") as Hex;
 const REGISTRY = (process.env.STANDING_REGISTRY ??
-  "0x05d68e4B5d79994096AeB62A04333C7491D63eD0") as Hex;
+  "0x2bD8832C9Bc98df47F256507a903B0338D96C0b5") as Hex;
 
 const client = createPublicClient({ chain: monadTestnet, transport: http() });
 const DAY = 86_400n;

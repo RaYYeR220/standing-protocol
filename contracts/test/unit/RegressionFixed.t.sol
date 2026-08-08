@@ -240,7 +240,7 @@ contract RegressionFixedTest is Fixture {
     /// @dev WAS: `_decimalsOffset()` was 0, so a first depositor could be griefed to exactly zero
     ///      shares by a donation. NOW: six decimals of virtual offset.
     function test_Fixed_FirstDepositorCannotBeGriefedToZeroShares() public {
-        StandingPool fresh = new StandingPool(address(asset), address(apass), address(policy), admin);
+        StandingPool fresh = new StandingPool(address(asset), address(apass), address(policy), address(validator), admin);
 
         InflationAttacker attackerC = new InflationAttacker(fresh, IERC20(address(asset)));
         issueCredential(address(attackerC), 50, 0, keccak256("kyc:inflate"));
@@ -270,7 +270,7 @@ contract RegressionFixedTest is Fixture {
         deposit = bound(deposit, 1e6, 1_000_000e6);
         donation = bound(donation, 0, deposit * 1e6 - 1);
 
-        StandingPool fresh = new StandingPool(address(asset), address(apass), address(policy), admin);
+        StandingPool fresh = new StandingPool(address(asset), address(apass), address(policy), address(validator), admin);
         asset.mint(address(this), donation);
         asset.transfer(address(fresh), donation);
 
@@ -288,7 +288,7 @@ contract RegressionFixedTest is Fixture {
     function test_Fixed_GriefingAFirstDepositorCostsAMillionToOne() public {
         uint256 victimDeposit = 10_000e6;
 
-        StandingPool fresh = new StandingPool(address(asset), address(apass), address(policy), admin);
+        StandingPool fresh = new StandingPool(address(asset), address(apass), address(policy), address(validator), admin);
         asset.mint(address(this), victimDeposit * 1e6);
         asset.transfer(address(fresh), victimDeposit * 1e6);
 
@@ -471,7 +471,7 @@ contract RegressionFixedTest is Fixture {
     }
 
     function test_Fixed_SetCreditManagerIsAdminOnlyAndOneShot() public {
-        StandingPool fresh = new StandingPool(address(asset), address(apass), address(policy), admin);
+        StandingPool fresh = new StandingPool(address(asset), address(apass), address(policy), address(validator), admin);
         assertEq(fresh.creditManager(), address(0), "unbound until set");
 
         bytes32 adminRole = fresh.DEFAULT_ADMIN_ROLE();
@@ -494,7 +494,7 @@ contract RegressionFixedTest is Fixture {
 
     /// @dev Until a manager is bound, the disbursement hooks are callable by nobody at all.
     function test_Fixed_UnboundPoolCannotDisburseToAnyone() public {
-        StandingPool fresh = new StandingPool(address(asset), address(apass), address(policy), admin);
+        StandingPool fresh = new StandingPool(address(asset), address(apass), address(policy), address(validator), admin);
 
         vm.expectRevert(StandingPool.NotCreditManager.selector);
         vm.prank(admin);

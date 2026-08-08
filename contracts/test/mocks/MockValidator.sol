@@ -27,6 +27,12 @@ contract MockValidator is ICleanverseValidator {
     /// @notice Return fewer than 32 bytes, i.e. a malformed verdict.
     bool public truncate;
 
+    /// @notice Return a full word that is not a valid bool (e.g. 2).
+    bool public dirtyBool;
+
+    /// @notice Return more than one word, with a valid verdict in the first.
+    bool public longPayload;
+
     mapping(address subject => bool) public registered;
     mapping(address party => bool) public partyDenied;
 
@@ -66,6 +72,14 @@ contract MockValidator is ICleanverseValidator {
         truncate = v;
     }
 
+    function setDirtyBool(bool v) external {
+        dirtyBool = v;
+    }
+
+    function setLongPayload(bool v) external {
+        longPayload = v;
+    }
+
     function setRegistered(address subject, bool v) external {
         registered[subject] = v;
     }
@@ -91,6 +105,10 @@ contract MockValidator is ICleanverseValidator {
         require(sel == VERIFY_SELECTOR, "validator: unknown selector");
 
         if (truncate) return abi.encodePacked(bytes16(0));
-        return abi.encode(!partyDenied[address(uint160(party))]);
+        if (dirtyBool) return abi.encode(uint256(2));
+
+        bool verdict = !partyDenied[address(uint160(party))];
+        if (longPayload) return abi.encode(verdict, uint256(0xdeadbeef));
+        return abi.encode(verdict);
     }
 }

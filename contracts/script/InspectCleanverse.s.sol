@@ -18,7 +18,7 @@ contract InspectCleanverse is Script {
 
     /// @dev A wallet holding a live A-Pass, and one that holds none.
     address constant CREDENTIALED = 0x9E2816003da34Ea0E232Fb59A5e475Fce1121d98;
-    address constant UNCREDENTIALED = 0x68dC37636DA76a24eDFb0e1B308123Eb4cd50EAA;
+    address constant UNCREDENTIALED = 0xAbC0000000000000000000000000000000000123;
 
     function run() external view {
         console.log("chain id                    %s", block.chainid);

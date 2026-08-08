@@ -194,6 +194,10 @@ abstract contract ComplianceGate {
             abi.encodeWithSelector(VALIDATOR_VERIFY, address(this), party)
         );
         if (!ok || ret.length < 32) return false;
-        return abi.decode(ret, (bool));
+        // Decoded as a word, not as a bool. `abi.decode(_, (bool))` reverts on any value that is
+        // neither 0 nor 1, and that revert would escape this function — turning a malformed verdict
+        // into an uncallable protocol rather than into a refusal. Every other external call here is
+        // wrapped; this one has to be too.
+        return abi.decode(ret, (uint256)) == 1;
     }
 }

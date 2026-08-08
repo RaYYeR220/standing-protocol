@@ -305,6 +305,10 @@ contract CreditManager is ComplianceGate, AccessControl, ReentrancyGuard {
     // ---------------------------------------------------------------- servicing
 
     /// @notice Repays a loan in full and returns any collateral posted.
+    /// @dev Assumes the verified asset does not take a fee on transfer: the amount pulled from the
+    ///      borrower is the amount the pool then pulls from here. aUSDC does not, but a Cleanverse
+    ///      Verified Asset that did would have the pool make up the difference out of the collateral
+    ///      this contract holds.
     function repay(uint256 loanId) external nonReentrant {
         Loan storage l = _loans[loanId];
         if (l.status != Status.Active) revert LoanNotActive(loanId);

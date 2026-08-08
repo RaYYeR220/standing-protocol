@@ -159,8 +159,8 @@ contract ComplianceTest is Fixture {
 
     function test_Borrow_RefusedWhenProtocolPolicyDenies() public {
         // The asset's own rules still permit the transfer; the protocol's do not.
-        policy.setRegistered(address(manager), true);
-        policy.setSubjectDenied(address(manager), true);
+        validator.setRegistered(address(manager), true);
+        validator.setPartyDenied(alice, true);
 
         (bool allowed, ComplianceGate.Refusal reason) =
             manager.checkTransfer(address(pool), alice, PRINCIPAL);
@@ -174,8 +174,8 @@ contract ComplianceTest is Fixture {
 
     /// @dev Unregistered means the protocol rule set simply does not apply — not that it denies.
     function test_Borrow_AllowedWhenProtocolIsNotRegisteredEvenIfItsRulesWouldDeny() public {
-        policy.setRegistered(address(manager), false);
-        policy.setSubjectDenied(address(manager), true);
+        validator.setRegistered(address(manager), false);
+        validator.setPartyDenied(alice, true);
 
         vm.prank(alice);
         uint256 loanId = manager.open(PRINCIPAL, TERM);
@@ -207,7 +207,7 @@ contract ComplianceTest is Fixture {
 
     /// @dev A registration lookup that reverts must not be read as "registered".
     function test_Borrow_AllowedWhenOnlyRegistrationLookupReverts() public {
-        policy.setRegistrationLookupDown(true);
+        validator.setDown(true);
 
         vm.prank(alice);
         uint256 loanId = manager.open(PRINCIPAL, TERM);
@@ -258,8 +258,8 @@ contract ComplianceTest is Fixture {
     }
 
     function test_Deposit_RefusedWhenProtocolPolicyDenies() public {
-        policy.setRegistered(address(pool), true);
-        policy.setSubjectDenied(address(pool), true);
+        validator.setRegistered(address(pool), true);
+        validator.setPartyDenied(lp2, true);
 
         expectRefusal(lp2, ComplianceGate.Refusal.ProtocolPolicyDenied);
         vm.prank(lp2);
@@ -315,8 +315,8 @@ contract ComplianceTest is Fixture {
     }
 
     function test_Withdraw_RefusedWhenProtocolPolicyDenies() public {
-        policy.setRegistered(address(pool), true);
-        policy.setSubjectDenied(address(pool), true);
+        validator.setRegistered(address(pool), true);
+        validator.setPartyDenied(lp, true);
 
         expectRefusal(lp, ComplianceGate.Refusal.ProtocolPolicyDenied);
         vm.prank(lp);
