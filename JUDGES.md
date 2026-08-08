@@ -1,7 +1,7 @@
 # Review this in five minutes
 
 Everything below runs with no API keys, no accounts and no wallet funding. If you only do one
-thing, do step 2 — or watch the [three-minute demo](https://standing-console.vercel.app/demo/standing-demo.mp4).
+thing, do step 2 — or watch the [three-minute demo](https://youtu.be/DlDVFTjD2mw).
 
 ---
 
