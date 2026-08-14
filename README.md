@@ -1,5 +1,8 @@
 # Standing
 
+> 🥉 **3rd place — DeFi track** at Cleanverse Build: Verified Finance (× Monad Foundation),
+> August 2026 · final score **78.3** · [results](https://cleanverse.com/hackathon-results)
+
 **Under-collateralized credit, where the identity is the collateral.**
 
 **[Live console](https://standing-console.vercel.app)** · **[demo video](https://youtu.be/DlDVFTjD2mw)** · [proof](PROOF.md) · [reviewer path](JUDGES.md) · [claims](CLAIMS.md)
